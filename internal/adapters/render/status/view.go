@@ -37,8 +37,6 @@ func renderView(statuses []application.Status, opts RenderOptions, s styles) str
 func renderAccount(status application.Status, opts RenderOptions, s styles) string {
 	parts := []string{
 		s.account.Render(accountTitle(status.Account.Name, status.Account.ID, status.Account.Metadata.PlanType)),
-		s.detail.Render(fmt.Sprintf("auth: %s", authLabel(status.Account.Auth.Method))),
-		s.detail.Render(usageLine(status)),
 	}
 
 	for _, line := range limitLines(status, opts, s) {
@@ -77,8 +75,13 @@ func limitLine(limit *application.StatusLimit, opts RenderOptions, s styles) str
 	leftPercent := clampPercent(100 - limit.Percent)
 	bar := renderProgressBar(limit.Percent, 24, s)
 	label := s.limitKey.Render(fmt.Sprintf("%s limit:", windowLabel(limit.Window)))
-	meta := s.limitMeta.Render(fmt.Sprintf("%2.0f%% left", leftPercent))
-	reset := s.limitMeta.Render(fmt.Sprintf("(%s)", formatResetRelative(limit.ResetsAt, opts.Now)))
+	percentColor := interpolateColor(leftPercent, 0, 100)
+	percentStyle := lipgloss.NewStyle().Foreground(percentColor)
+	meta := percentStyle.Render(fmt.Sprintf("%2.0f%% left", leftPercent))
+
+	resetColor := resetTimeColor(limit.ResetsAt, opts.Now, limit.Window)
+	resetStyle := lipgloss.NewStyle().Foreground(resetColor)
+	reset := resetStyle.Render(fmt.Sprintf("(%s)", formatResetRelative(limit.ResetsAt, opts.Now)))
 
 	line := lipgloss.JoinHorizontal(
 		lipgloss.Top,
@@ -221,10 +224,61 @@ func accountClassification(planType string) string {
 }
 
 func windowLabel(window application.LimitWindowKind) string {
-	name := strings.TrimSpace(string(window))
-	if name == "" {
+	switch window {
+	case application.LimitWindowDaily:
+		return "5hours"
+	case application.LimitWindowWeekly:
+		return "weekly"
+	default:
 		return "unknown"
 	}
+}
 
-	return name
+func interpolateColor(value, min, max float64) lipgloss.Color {
+	// Guard against division by zero
+	if max == min {
+		return lipgloss.Color("255")
+	}
+
+	// Normalize value between 0 and 1
+	normalized := (value - min) / (max - min)
+	if normalized < 0 {
+		normalized = 0
+	}
+	if normalized > 1 {
+		normalized = 1
+	}
+
+	// Color 240 (gray/faded) at min, Color 255 (bright white) at max
+	// ANSI 256 greyscale ramp: 232 (darkest) to 255 (brightest)
+	baseColor := 240.0
+	targetColor := 255.0
+
+	// Linear interpolation
+	interpolated := baseColor + (targetColor-baseColor)*normalized
+	colorCode := int(interpolated)
+
+	return lipgloss.Color(fmt.Sprintf("%d", colorCode))
+}
+
+func resetTimeColor(resetsAt, now time.Time, window application.LimitWindowKind) lipgloss.Color {
+	if now.IsZero() || resetsAt.Before(now) {
+		return lipgloss.Color("255") // Bright white when no time context
+	}
+
+	remaining := resetsAt.Sub(now)
+
+	// For daily limits: fade from 5 hours to 0
+	// For weekly limits: fade from 7 days to 0
+	var maxDuration time.Duration
+	if window == application.LimitWindowDaily {
+		maxDuration = 5 * time.Hour
+	} else {
+		maxDuration = 7 * 24 * time.Hour
+	}
+
+	// Closer to 0 = whiter (255), at max or beyond = more faded (240)
+	// Invert the remaining time so that 0 remaining maps to max (white)
+	inverted := maxDuration.Seconds() - remaining.Seconds()
+	return interpolateColor(inverted, 0, maxDuration.Seconds())
 }

@@ -68,13 +68,3 @@ oa status --account 1 --json
 ```bash
 go test ./...
 ```
-
-## Contributing
-
-We'd love your contributions! Every PR makes **oa** better for the entire community.
-
----
-
-Built with Go. Made with passion. Designed for developers who demand excellence.
-
-If you find **oa** useful, consider giving us a star!

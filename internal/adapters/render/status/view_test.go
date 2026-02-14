@@ -33,9 +33,7 @@ func TestRenderSingleAccountStatus(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, output, "accounts: 1")
 	assert.Contains(t, output, "Primary")
-	assert.Contains(t, output, "auth: api_key")
-	assert.Contains(t, output, "usage: 2500 tokens")
-	assert.Contains(t, output, "daily limit:")
+	assert.Contains(t, output, "5hours limit:")
 	assert.Contains(t, output, "27% left")
 	assert.Contains(t, output, "resets in 13 hours (00:00)")
 	assert.Contains(t, output, "[")
@@ -81,7 +79,7 @@ func TestRenderMultiAccountStatus(t *testing.T) {
 	assert.Contains(t, output, "accounts: 2")
 	assert.Contains(t, output, "Primary")
 	assert.Contains(t, output, "Backup")
-	assert.Contains(t, output, "daily limit:")
+	assert.Contains(t, output, "5hours limit:")
 	assert.Contains(t, output, "weekly limit:")
 	assert.Contains(t, output, "48% left")
 	assert.Contains(t, output, "88% left")
@@ -110,7 +108,7 @@ func TestRenderMarksStaleLimitSnapshot(t *testing.T) {
 	}, RenderOptions{Now: now, StaleAfter: 12 * time.Hour})
 
 	require.NoError(t, err)
-	assert.Contains(t, output, "daily limit:")
+	assert.Contains(t, output, "5hours limit:")
 	assert.Contains(t, output, "20% left")
 	assert.Contains(t, output, "[stale]")
 }
@@ -138,7 +136,7 @@ func TestRenderShowsDailyAndWeeklyLimitsWhenBothAvailable(t *testing.T) {
 	}, RenderOptions{Now: now, StaleAfter: 6 * time.Hour})
 
 	require.NoError(t, err)
-	assert.Contains(t, output, "daily limit:")
+	assert.Contains(t, output, "5hours limit:")
 	assert.Contains(t, output, "weekly limit:")
 	assert.Contains(t, output, "20% left")
 	assert.Contains(t, output, "55% left")
@@ -179,5 +177,6 @@ func TestRenderShowsUnavailableUsageHintForChatGPTWithoutTokenSnapshot(t *testin
 	}, RenderOptions{Now: now, StaleAfter: 6 * time.Hour})
 
 	require.NoError(t, err)
-	assert.Contains(t, output, "usage: n/a (live token totals unavailable)")
+	assert.Contains(t, output, "Primary")
+	assert.Contains(t, output, "5hours limit:")
 }

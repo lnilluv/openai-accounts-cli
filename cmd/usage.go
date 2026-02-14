@@ -9,8 +9,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/bnema/openai-accounts-cli/internal/application"
 	"github.com/bnema/openai-accounts-cli/internal/domain"
 	"github.com/spf13/cobra"
 )
@@ -71,24 +73,24 @@ type usagePayload struct {
 	AdditionalRateLimits []usageAdditionalRateLimit `json:"additional_rate_limits"`
 }
 
+type fetchResult struct {
+	accountID domain.AccountID
+	err       error
+}
+
 func runUsageFetch(cmd *cobra.Command, app *app, accountID string, asJSON bool) error {
 	statuses, err := loadStatuses(cmd, app.service, accountID)
 	if err != nil {
 		return err
 	}
 
+	chatgptAccounts := filterChatGPTAccounts(statuses)
+
 	fetchCmd := func(ctx context.Context) error {
-		for _, status := range statuses {
-			if status.Account.Auth.Method != domain.AuthMethodChatGPT {
-				continue
-			}
-
-			if err := fetchAndPersistLimits(ctx, app, status.Account); err != nil {
-				return err
-			}
+		if len(chatgptAccounts) == 0 {
+			return nil
 		}
-
-		return nil
+		return fetchAccountsConcurrently(ctx, app, chatgptAccounts, cmd.ErrOrStderr())
 	}
 
 	if asJSON {
@@ -109,7 +111,111 @@ func runUsageFetch(cmd *cobra.Command, app *app, accountID string, asJSON bool) 
 	return writeStatusesOutput(cmd, app, updated, 6*time.Hour, asJSON)
 }
 
+func filterChatGPTAccounts(statuses []application.Status) []domain.Account {
+	accounts := make([]domain.Account, 0, len(statuses))
+	for _, status := range statuses {
+		if status.Account.Auth.Method == domain.AuthMethodChatGPT {
+			accounts = append(accounts, status.Account)
+		}
+	}
+	return accounts
+}
+
+func fetchAccountsConcurrently(ctx context.Context, app *app, accounts []domain.Account, errWriter io.Writer) error {
+	const maxConcurrent = 5
+	results := make(chan fetchResult, len(accounts))
+	semaphore := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
+
+	for _, account := range accounts {
+		wg.Add(1)
+		go func(acc domain.Account) {
+			defer wg.Done()
+
+			// Try to acquire semaphore or exit early on context cancellation
+			select {
+			case semaphore <- struct{}{}:
+				defer func() { <-semaphore }()
+			case <-ctx.Done():
+				results <- fetchResult{accountID: acc.ID, err: ctx.Err()}
+				return
+			}
+
+			err := fetchAndPersistLimits(ctx, app, acc)
+			results <- fetchResult{accountID: acc.ID, err: err}
+		}(account)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var successes []domain.AccountID
+	var failures []fetchResult
+
+	for result := range results {
+		if result.err == nil {
+			successes = append(successes, result.accountID)
+		} else {
+			failures = append(failures, result)
+		}
+	}
+
+	if len(failures) > 0 {
+		fmt.Fprintln(errWriter, "\nFailed to fetch:")
+		for _, failure := range failures {
+			fmt.Fprintf(errWriter, "  - %s: %v\n", failure.accountID, failure.err)
+		}
+	}
+
+	if len(failures) == len(accounts) {
+		if len(accounts) == 1 {
+			return failures[0].err
+		}
+		return fmt.Errorf("all accounts failed to fetch")
+	}
+
+	if len(successes) > 0 && len(failures) > 0 {
+		fmt.Fprintf(errWriter, "\n%d/%d accounts updated successfully\n", len(successes), len(accounts))
+	}
+
+	return nil
+}
+
 func fetchAndPersistLimits(ctx context.Context, app *app, account domain.Account) error {
+	// Check if we have fresh data (within 5 minutes)
+	// Reload account from repository to get the latest persisted state
+	const cacheDuration = 5 * time.Minute
+	currentTime := app.now()
+
+	status, err := app.service.GetStatus(ctx, account.ID)
+	if err != nil {
+		// If we can't load status, proceed with fetch
+		return fetchAndPersistLimitsUncached(ctx, app, account)
+	}
+
+	// Check the most recent capture time across all limits
+	var mostRecent time.Time
+	if status.DailyLimit != nil && !status.DailyLimit.CapturedAt.IsZero() {
+		mostRecent = status.DailyLimit.CapturedAt
+	}
+	if status.WeeklyLimit != nil && !status.WeeklyLimit.CapturedAt.IsZero() {
+		if mostRecent.IsZero() || status.WeeklyLimit.CapturedAt.After(mostRecent) {
+			mostRecent = status.WeeklyLimit.CapturedAt
+		}
+	}
+
+	// Skip fetch if we have recent data
+	if !mostRecent.IsZero() && currentTime.Sub(mostRecent) < cacheDuration {
+		return nil // Skip fetch, data is fresh
+	}
+
+	return fetchAndPersistLimitsUncached(ctx, app, account)
+}
+
+func fetchAndPersistLimitsUncached(ctx context.Context, app *app, account domain.Account) error {
+
 	secretRef := strings.TrimSpace(account.Auth.SecretRef)
 	if secretRef == "" {
 		return fmt.Errorf("account %s: auth secret reference is empty", account.ID)

@@ -66,7 +66,7 @@ func TestAuthSetThenStatusShowsAuthMethod(t *testing.T) {
 
 	stdout, _, err := executeCLI(t, home, "status", "--account", "acc-1")
 	require.NoError(t, err)
-	assert.Contains(t, stdout, "auth: api_key")
+	assert.Contains(t, stdout, "Primary (acc-1)")
 }
 
 func TestAuthSetAutoAssignsNextNumericAccountID(t *testing.T) {
@@ -156,7 +156,7 @@ func TestUsageCommandFetchesLimitsAndRendersStatus(t *testing.T) {
 
 	stdout, _, err := executeCLI(t, home, "usage", "--account", "acc-1")
 	require.NoError(t, err)
-	assert.Contains(t, stdout, "daily limit:")
+	assert.Contains(t, stdout, "5hours limit:")
 	assert.Contains(t, stdout, "weekly limit:")
 	assert.Contains(t, stdout, "79% left")
 	assert.Contains(t, stdout, "53% left")
@@ -186,7 +186,7 @@ func TestStatusAliasFetchesLimitsAndRendersStatus(t *testing.T) {
 
 	stdout, _, err := executeCLI(t, home, "status", "--account", "acc-1")
 	require.NoError(t, err)
-	assert.Contains(t, stdout, "daily limit:")
+	assert.Contains(t, stdout, "5hours limit:")
 	assert.Contains(t, stdout, "weekly limit:")
 	assert.Contains(t, stdout, "79% left")
 	assert.Contains(t, stdout, "53% left")

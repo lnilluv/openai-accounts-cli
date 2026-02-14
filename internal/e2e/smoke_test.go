@@ -28,14 +28,13 @@ func TestSmokeFlow(t *testing.T) {
 	stdout, stderr, err := runOA(t, binaryPath, home, "status", "--account", "acc-1")
 	require.NoError(t, err, "stderr: %s", stderr)
 	assert.Contains(t, stdout, "Primary (acc-1)")
-	assert.Contains(t, stdout, "auth: api_key")
 }
 
 func buildBinary(t *testing.T) string {
 	t.Helper()
 
 	binaryPath := filepath.Join(t.TempDir(), "oa-e2e")
-	cmd := exec.Command("go", "build", "-o", binaryPath, ".")
+	cmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/oa")
 	cmd.Dir = repoRoot(t)
 
 	output, err := cmd.CombinedOutput()
