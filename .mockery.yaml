@@ -1,0 +1,12 @@
+template: testify
+formatter: goimports
+force-file-write: true
+
+packages:
+  github.com/bnema/openai-accounts-cli/internal/ports:
+    config:
+      all: true
+      dir: "{{.InterfaceDir}}/mocks"
+      pkgname: mocks
+      filename: "{{.InterfaceName}}.go"
+      structname: "Mock{{.InterfaceName}}"
