@@ -542,6 +542,35 @@ func TestServiceSetLimitRejectsUnsupportedWindow(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestServiceSetSubscription(t *testing.T) {
+	repo := mocks.NewMockAccountRepository(t)
+	store := mocks.NewMockSecretStore(t)
+	clock := mocks.NewMockClock(t)
+	service := NewService(repo, store, clock)
+
+	now := time.Date(2026, 2, 15, 12, 0, 0, 0, time.UTC)
+	clock.EXPECT().Now().Return(now).Once()
+
+	account := domain.Account{ID: "acc-1", Name: "openai"}
+	repo.EXPECT().GetByID(mockAnyContext(), domain.AccountID("acc-1")).Return(account, nil).Once()
+	repo.EXPECT().Save(mockAnyContext(), mock.MatchedBy(func(saved domain.Account) bool {
+		return saved.Subscription != nil &&
+			saved.Subscription.WillRenew == true &&
+			saved.Subscription.BillingPeriod == "monthly" &&
+			saved.Subscription.CapturedAt.Equal(now)
+	})).Return(nil)
+
+	sub := domain.Subscription{
+		ActiveStart:     time.Date(2026, 2, 14, 7, 41, 19, 0, time.UTC),
+		ActiveUntil:     time.Date(2026, 3, 14, 7, 41, 19, 0, time.UTC),
+		WillRenew:       true,
+		BillingPeriod:   "monthly",
+		BillingCurrency: "EUR",
+	}
+	err := service.SetSubscription(context.Background(), "acc-1", sub)
+	require.NoError(t, err)
+}
+
 func mockAnyContext() interface{} {
 	return mock.Anything
 }

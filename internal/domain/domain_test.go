@@ -64,6 +64,16 @@ func TestLimitSnapshotStaleDetectionZeroAsOf(t *testing.T) {
 	assert.True(t, s.IsStale(now, 10*time.Minute))
 }
 
+func TestSubscriptionRenewsIn(t *testing.T) {
+	now := time.Date(2026, 2, 15, 12, 0, 0, 0, time.UTC)
+	sub := Subscription{
+		ActiveUntil: time.Date(2026, 3, 14, 7, 41, 19, 0, time.UTC),
+		WillRenew:   true,
+	}
+	remaining := sub.ActiveUntil.Sub(now)
+	assert.InDelta(t, 26.8, remaining.Hours()/24, 0.5)
+}
+
 func TestCompactNumberBoundaries(t *testing.T) {
 	tests := []struct {
 		name  string

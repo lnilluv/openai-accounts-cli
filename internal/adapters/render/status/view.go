@@ -35,12 +35,21 @@ func renderView(statuses []application.Status, opts RenderOptions, s styles) str
 }
 
 func renderAccount(status application.Status, opts RenderOptions, s styles) string {
+	titleStyle := s.account
+	if isWeeklyLimitExhausted(status) {
+		titleStyle = titleStyle.Foreground(lipgloss.Color("25"))
+	}
+
 	parts := []string{
-		s.account.Render(accountTitle(status.Account.Name, status.Account.ID, status.Account.Metadata.PlanType)),
+		titleStyle.Render(accountTitle(status.Account.Name, status.Account.ID, status.Account.Metadata.PlanType)),
 	}
 
 	for _, line := range limitLines(status, opts, s) {
 		parts = append(parts, line)
+	}
+
+	if status.Subscription != nil {
+		parts = append(parts, subscriptionLine(status.Subscription, opts, s))
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -259,6 +268,71 @@ func interpolateColor(value, min, max float64) lipgloss.Color {
 	colorCode := int(interpolated)
 
 	return lipgloss.Color(fmt.Sprintf("%d", colorCode))
+}
+
+func subscriptionLine(sub *application.StatusSubscription, opts RenderOptions, s styles) string {
+	if sub.ActiveUntil.IsZero() {
+		return s.detail.Render("renewal: n/a")
+	}
+
+	label := s.limitKey.Render("renewal:")
+	renewalText := formatRenewalRelative(sub.ActiveUntil, sub.WillRenew, opts.Now)
+
+	line := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		label,
+		" ",
+		renewalText,
+	)
+
+	if sub.IsDelinquent {
+		line += " " + s.warning.Render("[payment issue]")
+	}
+
+	return line
+}
+
+func formatRenewalRelative(activeUntil time.Time, willRenew bool, now time.Time) string {
+	if now.IsZero() {
+		return activeUntil.Format("02 Jan 2006")
+	}
+
+	action := "renews"
+	if !willRenew {
+		action = "expires"
+	}
+
+	if activeUntil.Before(now) {
+		if willRenew {
+			return "renewed"
+		}
+		return "expired"
+	}
+
+	remaining := activeUntil.Sub(now)
+	days := int(remaining.Hours() / 24)
+
+	if days < 1 {
+		hours := int(remaining.Hours())
+		if hours < 1 {
+			return fmt.Sprintf("%s soon", action)
+		}
+		suffix := "hours"
+		if hours == 1 {
+			suffix = "hour"
+		}
+		return fmt.Sprintf("%s in %d %s", action, hours, suffix)
+	}
+
+	suffix := "days"
+	if days == 1 {
+		suffix = "day"
+	}
+	return fmt.Sprintf("%s in %d %s (%s)", action, days, suffix, activeUntil.Format("02 Jan"))
+}
+
+func isWeeklyLimitExhausted(status application.Status) bool {
+	return status.WeeklyLimit != nil && status.WeeklyLimit.Percent >= 100
 }
 
 func resetTimeColor(resetsAt, now time.Time, window application.LimitWindowKind) lipgloss.Color {

@@ -281,7 +281,8 @@ func toSchema(account domain.Account) accountSchema {
 			OutputTokens:      account.Usage.OutputTokens,
 			CachedInputTokens: account.Usage.CachedInputTokens,
 		},
-		Limits: limits,
+		Limits:       limits,
+		Subscription: toSubscriptionSchema(account.Subscription),
 	}
 }
 
@@ -318,6 +319,7 @@ func fromSchema(account accountSchema) domain.Account {
 			Daily:  fromLimitSnapshotSchema(account.Limits.Daily),
 			Weekly: fromLimitSnapshotSchema(account.Limits.Weekly),
 		},
+		Subscription: fromSubscriptionSchema(account.Subscription),
 	}
 }
 
@@ -364,4 +366,34 @@ func formatTime(value time.Time) string {
 	}
 
 	return value.Format(time.RFC3339)
+}
+
+func toSubscriptionSchema(sub *domain.Subscription) *subscriptionSchema {
+	if sub == nil {
+		return nil
+	}
+	return &subscriptionSchema{
+		ActiveStart:     formatTime(sub.ActiveStart),
+		ActiveUntil:     formatTime(sub.ActiveUntil),
+		WillRenew:       sub.WillRenew,
+		BillingPeriod:   sub.BillingPeriod,
+		BillingCurrency: sub.BillingCurrency,
+		IsDelinquent:    sub.IsDelinquent,
+		CapturedAt:      formatTime(sub.CapturedAt),
+	}
+}
+
+func fromSubscriptionSchema(s *subscriptionSchema) *domain.Subscription {
+	if s == nil {
+		return nil
+	}
+	return &domain.Subscription{
+		ActiveStart:     parseTime(s.ActiveStart),
+		ActiveUntil:     parseTime(s.ActiveUntil),
+		WillRenew:       s.WillRenew,
+		BillingPeriod:   s.BillingPeriod,
+		BillingCurrency: s.BillingCurrency,
+		IsDelinquent:    s.IsDelinquent,
+		CapturedAt:      parseTime(s.CapturedAt),
+	}
 }

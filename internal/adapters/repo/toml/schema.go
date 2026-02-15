@@ -24,12 +24,13 @@ func (s fileSchema) validateVersion() error {
 }
 
 type accountSchema struct {
-	ID       string         `toml:"id"`
-	Name     string         `toml:"name"`
-	Metadata metadataSchema `toml:"metadata"`
-	Auth     authSchema     `toml:"auth"`
-	Usage    usageSchema    `toml:"usage,omitempty"`
-	Limits   limitsSchema   `toml:"limits,omitempty"`
+	ID           string              `toml:"id"`
+	Name         string              `toml:"name"`
+	Metadata     metadataSchema      `toml:"metadata"`
+	Auth         authSchema          `toml:"auth"`
+	Usage        usageSchema         `toml:"usage,omitempty"`
+	Limits       limitsSchema        `toml:"limits,omitempty"`
+	Subscription *subscriptionSchema `toml:"subscription,omitempty"`
 }
 
 type metadataSchema struct {
@@ -59,4 +60,14 @@ type limitSnapshotSchema struct {
 	Percent    float64 `toml:"percent"`
 	ResetsAt   string  `toml:"resets_at"`
 	CapturedAt string  `toml:"captured_at"`
+}
+
+type subscriptionSchema struct {
+	ActiveStart     string `toml:"active_start"`
+	ActiveUntil     string `toml:"active_until"`
+	WillRenew       bool   `toml:"will_renew"`
+	BillingPeriod   string `toml:"billing_period"`
+	BillingCurrency string `toml:"billing_currency"`
+	IsDelinquent    bool   `toml:"is_delinquent"`
+	CapturedAt      string `toml:"captured_at"`
 }

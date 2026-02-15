@@ -13,9 +13,20 @@ type StatusLimit struct {
 	CapturedAt time.Time
 }
 
+type StatusSubscription struct {
+	ActiveStart     time.Time
+	ActiveUntil     time.Time
+	WillRenew       bool
+	BillingPeriod   string
+	BillingCurrency string
+	CapturedAt      time.Time
+	IsDelinquent    bool
+}
+
 type Status struct {
-	Account     domain.Account
-	Usage       domain.Usage
-	DailyLimit  *StatusLimit
-	WeeklyLimit *StatusLimit
+	Account      domain.Account
+	Usage        domain.Usage
+	DailyLimit   *StatusLimit
+	WeeklyLimit  *StatusLimit
+	Subscription *StatusSubscription
 }

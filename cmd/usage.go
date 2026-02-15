@@ -73,6 +73,16 @@ type usagePayload struct {
 	AdditionalRateLimits []usageAdditionalRateLimit `json:"additional_rate_limits"`
 }
 
+type subscriptionPayload struct {
+	PlanType        string `json:"plan_type"`
+	ActiveStart     string `json:"active_start"`
+	ActiveUntil     string `json:"active_until"`
+	WillRenew       bool   `json:"will_renew"`
+	BillingPeriod   string `json:"billing_period"`
+	BillingCurrency string `json:"billing_currency"`
+	IsDelinquent    bool   `json:"is_delinquent"`
+}
+
 type fetchResult struct {
 	accountID domain.AccountID
 	err       error
@@ -273,6 +283,23 @@ func fetchAndPersistLimitsUncached(ctx context.Context, app *app, account domain
 		}
 	}
 
+	subPayload, subErr := fetchSubscriptionPayload(ctx, app.httpClient, app.usageBaseURL, tokens)
+	if subErr == nil {
+		activeStart, _ := time.Parse(time.RFC3339, subPayload.ActiveStart)
+		activeUntil, _ := time.Parse(time.RFC3339, subPayload.ActiveUntil)
+		sub := domain.Subscription{
+			ActiveStart:     activeStart,
+			ActiveUntil:     activeUntil,
+			WillRenew:       subPayload.WillRenew,
+			BillingPeriod:   subPayload.BillingPeriod,
+			BillingCurrency: subPayload.BillingCurrency,
+			IsDelinquent:    subPayload.IsDelinquent,
+		}
+		if err := app.service.SetSubscription(ctx, account.ID, sub); err != nil {
+			return fmt.Errorf("account %s: save subscription: %w", account.ID, err)
+		}
+	}
+
 	return nil
 }
 
@@ -308,6 +335,46 @@ func fetchUsagePayload(ctx context.Context, client *http.Client, baseURL string,
 	var payload usagePayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return usagePayload{}, fmt.Errorf("decode payload: %w", err)
+	}
+
+	return payload, nil
+}
+
+func fetchSubscriptionPayload(ctx context.Context, client *http.Client, baseURL string, tokens oauthTokens) (subscriptionPayload, error) {
+	accountID := accountIDFromToken(tokens.IDToken)
+
+	endpoint := strings.TrimRight(baseURL, "/") + "/subscriptions"
+	if accountID != "" {
+		endpoint += "?account_id=" + accountID
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return subscriptionPayload{}, fmt.Errorf("create request: %w", err)
+	}
+	request.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	request.Header.Set("User-Agent", "oa/usage")
+
+	response, err := client.Do(request)
+	if err != nil {
+		return subscriptionPayload{}, fmt.Errorf("perform request: %w", err)
+	}
+	defer response.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return subscriptionPayload{}, fmt.Errorf("read response: %w", err)
+	}
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+			return subscriptionPayload{}, fmt.Errorf("%w: status %d: %s", errUsageSessionExpired, response.StatusCode, strings.TrimSpace(string(body)))
+		}
+		return subscriptionPayload{}, fmt.Errorf("status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var payload subscriptionPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return subscriptionPayload{}, fmt.Errorf("decode payload: %w", err)
 	}
 
 	return payload, nil

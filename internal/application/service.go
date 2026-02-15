@@ -248,6 +248,25 @@ func (s *Service) SetLimit(ctx context.Context, id domain.AccountID, kind LimitW
 	return nil
 }
 
+func (s *Service) SetSubscription(ctx context.Context, id domain.AccountID, sub domain.Subscription) error {
+	account, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get account by id: %w", err)
+	}
+
+	if sub.CapturedAt.IsZero() {
+		sub.CapturedAt = s.clock.Now()
+	}
+
+	account.Subscription = &sub
+
+	if err := s.repo.Save(ctx, account); err != nil {
+		return fmt.Errorf("save account subscription: %w", err)
+	}
+
+	return nil
+}
+
 func (s *Service) GetStatus(ctx context.Context, id domain.AccountID) (Status, error) {
 	account, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -273,10 +292,26 @@ func (s *Service) GetStatusAll(ctx context.Context) ([]Status, error) {
 
 func statusFromAccount(account domain.Account) Status {
 	return Status{
-		Account:     account,
-		Usage:       account.Usage,
-		DailyLimit:  toStatusLimit(LimitWindowDaily, account.Limits.Daily),
-		WeeklyLimit: toStatusLimit(LimitWindowWeekly, account.Limits.Weekly),
+		Account:      account,
+		Usage:        account.Usage,
+		DailyLimit:   toStatusLimit(LimitWindowDaily, account.Limits.Daily),
+		WeeklyLimit:  toStatusLimit(LimitWindowWeekly, account.Limits.Weekly),
+		Subscription: toStatusSubscription(account.Subscription),
+	}
+}
+
+func toStatusSubscription(sub *domain.Subscription) *StatusSubscription {
+	if sub == nil {
+		return nil
+	}
+	return &StatusSubscription{
+		ActiveStart:     sub.ActiveStart,
+		ActiveUntil:     sub.ActiveUntil,
+		WillRenew:       sub.WillRenew,
+		BillingPeriod:   sub.BillingPeriod,
+		BillingCurrency: sub.BillingCurrency,
+		CapturedAt:      sub.CapturedAt,
+		IsDelinquent:    sub.IsDelinquent,
 	}
 }
 

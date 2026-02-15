@@ -134,9 +134,15 @@ func TestUsageSetSubcommandIsRemoved(t *testing.T) {
 
 func TestUsageCommandFetchesLimitsAndRendersStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/wham/usage", r.URL.Path)
-		assert.Equal(t, "Bearer access-token-123", r.Header.Get("Authorization"))
-		_, _ = fmt.Fprint(w, `{"plan_type":"pro","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":21,"limit_window_seconds":18000,"reset_after_seconds":120,"reset_at":1893456000},"secondary_window":{"used_percent":47,"limit_window_seconds":604800,"reset_after_seconds":3600,"reset_at":1893888000}}}`)
+		switch {
+		case r.URL.Path == "/wham/usage":
+			assert.Equal(t, "Bearer access-token-123", r.Header.Get("Authorization"))
+			_, _ = fmt.Fprint(w, `{"plan_type":"pro","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":21,"limit_window_seconds":18000,"reset_after_seconds":120,"reset_at":1893456000},"secondary_window":{"used_percent":47,"limit_window_seconds":604800,"reset_after_seconds":3600,"reset_at":1893888000}}}`)
+		case r.URL.Path == "/subscriptions":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer server.Close()
 
@@ -164,9 +170,15 @@ func TestUsageCommandFetchesLimitsAndRendersStatus(t *testing.T) {
 
 func TestStatusAliasFetchesLimitsAndRendersStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/wham/usage", r.URL.Path)
-		assert.Equal(t, "Bearer access-token-123", r.Header.Get("Authorization"))
-		_, _ = fmt.Fprint(w, `{"plan_type":"pro","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":21,"limit_window_seconds":18000,"reset_after_seconds":120,"reset_at":1893456000},"secondary_window":{"used_percent":47,"limit_window_seconds":604800,"reset_after_seconds":3600,"reset_at":1893888000}}}`)
+		switch {
+		case r.URL.Path == "/wham/usage":
+			assert.Equal(t, "Bearer access-token-123", r.Header.Get("Authorization"))
+			_, _ = fmt.Fprint(w, `{"plan_type":"pro","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":21,"limit_window_seconds":18000,"reset_after_seconds":120,"reset_at":1893456000},"secondary_window":{"used_percent":47,"limit_window_seconds":604800,"reset_after_seconds":3600,"reset_at":1893888000}}}`)
+		case r.URL.Path == "/subscriptions":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer server.Close()
 
@@ -296,6 +308,40 @@ func TestUsageCommandUpdatesAccountNameFromTokenEmail(t *testing.T) {
 	stdout, _, err := executeCLI(t, home, "usage", "--account", "acc-1")
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "Account: email@adress.com (Team)")
+}
+
+func TestUsageCommandFetchesSubscriptionAndRendersRenewal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/wham/usage":
+			_, _ = fmt.Fprint(w, `{"plan_type":"plus","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":21,"limit_window_seconds":18000,"reset_after_seconds":120,"reset_at":1893456000},"secondary_window":{"used_percent":47,"limit_window_seconds":604800,"reset_after_seconds":3600,"reset_at":1893888000}}}`)
+		case r.URL.Path == "/subscriptions":
+			_, _ = fmt.Fprint(w, `{"plan_type":"plus","active_start":"2026-02-14T07:41:19Z","active_until":"2026-03-14T07:41:19Z","will_renew":true,"billing_period":"monthly","billing_currency":"EUR","is_delinquent":false}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("OA_USAGE_BASE_URL", server.URL)
+
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixture(home))
+
+	_, _, err := executeCLI(t, home,
+		"auth", "set",
+		"--account", "acc-1",
+		"--method", "chatgpt",
+		"--secret-key", "openai://acc-1/oauth_tokens",
+		"--secret-value", `{"access_token":"access-token-123","id_token":""}`,
+	)
+	require.NoError(t, err)
+
+	stdout, _, err := executeCLI(t, home, "usage", "--account", "acc-1")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "renewal:")
+	assert.Contains(t, stdout, "renews in")
+	assert.Contains(t, stdout, "14 Mar")
 }
 
 func executeCLI(t *testing.T, home string, args ...string) (string, string, error) {
