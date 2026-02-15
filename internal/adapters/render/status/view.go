@@ -35,8 +35,13 @@ func renderView(statuses []application.Status, opts RenderOptions, s styles) str
 }
 
 func renderAccount(status application.Status, opts RenderOptions, s styles) string {
+	titleStyle := s.account
+	if isWeeklyLimitExhausted(status) {
+		titleStyle = titleStyle.Foreground(lipgloss.Color("25"))
+	}
+
 	parts := []string{
-		s.account.Render(accountTitle(status.Account.Name, status.Account.ID, status.Account.Metadata.PlanType)),
+		titleStyle.Render(accountTitle(status.Account.Name, status.Account.ID, status.Account.Metadata.PlanType)),
 	}
 
 	for _, line := range limitLines(status, opts, s) {
@@ -324,6 +329,10 @@ func formatRenewalRelative(activeUntil time.Time, willRenew bool, now time.Time)
 		suffix = "day"
 	}
 	return fmt.Sprintf("%s in %d %s (%s)", action, days, suffix, activeUntil.Format("02 Jan"))
+}
+
+func isWeeklyLimitExhausted(status application.Status) bool {
+	return status.WeeklyLimit != nil && status.WeeklyLimit.Percent >= 100
 }
 
 func resetTimeColor(resetsAt, now time.Time, window application.LimitWindowKind) lipgloss.Color {
