@@ -1,6 +1,7 @@
 package status
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -179,4 +180,73 @@ func TestRenderShowsUnavailableUsageHintForChatGPTWithoutTokenSnapshot(t *testin
 	require.NoError(t, err)
 	assert.Contains(t, output, "Primary")
 	assert.Contains(t, output, "5hours limit:")
+}
+
+func TestRenderPrioritizesAccountsForWeeklyUsage(t *testing.T) {
+	now := time.Date(2026, 2, 14, 11, 0, 0, 0, time.UTC)
+
+	output, err := Render([]application.Status{
+		{
+			Account: domain.Account{ID: "acc-blocked", Name: "blocked@example.com", Auth: domain.Auth{Method: domain.AuthMethodChatGPT}},
+			DailyLimit: &application.StatusLimit{
+				Window:     application.LimitWindowDaily,
+				Percent:    0,
+				ResetsAt:   now.Add(5 * time.Hour),
+				CapturedAt: now,
+			},
+			WeeklyLimit: &application.StatusLimit{
+				Window:     application.LimitWindowWeekly,
+				Percent:    100,
+				ResetsAt:   now.Add(2 * time.Hour),
+				CapturedAt: now,
+			},
+		},
+		{
+			Account: domain.Account{ID: "acc-mid", Name: "mid@example.com", Auth: domain.Auth{Method: domain.AuthMethodChatGPT}},
+			DailyLimit: &application.StatusLimit{
+				Window:     application.LimitWindowDaily,
+				Percent:    20,
+				ResetsAt:   now.Add(5 * time.Hour),
+				CapturedAt: now,
+			},
+			WeeklyLimit: &application.StatusLimit{
+				Window:     application.LimitWindowWeekly,
+				Percent:    70,
+				ResetsAt:   now.Add(2 * 24 * time.Hour),
+				CapturedAt: now,
+			},
+		},
+		{
+			Account: domain.Account{ID: "acc-best", Name: "best@example.com", Auth: domain.Auth{Method: domain.AuthMethodChatGPT}},
+			DailyLimit: &application.StatusLimit{
+				Window:     application.LimitWindowDaily,
+				Percent:    20,
+				ResetsAt:   now.Add(5 * time.Hour),
+				CapturedAt: now,
+			},
+			WeeklyLimit: &application.StatusLimit{
+				Window:     application.LimitWindowWeekly,
+				Percent:    0,
+				ResetsAt:   now.Add(5 * 24 * time.Hour),
+				CapturedAt: now,
+			},
+		},
+	}, RenderOptions{Now: now, StaleAfter: 6 * time.Hour})
+
+	require.NoError(t, err)
+	assert.Contains(t, output, "recommendation:")
+	assert.Contains(t, output, "best@example.com")
+	assert.Contains(t, output, "details:")
+	assert.Contains(t, output, "next:")
+	assert.NotContains(t, output, "recommendation: use Account:")
+
+	bestIndex := strings.Index(output, "Account: best@example.com")
+	midIndex := strings.Index(output, "Account: mid@example.com")
+	blockedIndex := strings.Index(output, "Account: blocked@example.com")
+
+	require.NotEqual(t, -1, bestIndex)
+	require.NotEqual(t, -1, midIndex)
+	require.NotEqual(t, -1, blockedIndex)
+	assert.Less(t, bestIndex, midIndex)
+	assert.Less(t, midIndex, blockedIndex)
 }

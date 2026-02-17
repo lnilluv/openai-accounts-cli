@@ -3,6 +3,7 @@ package status
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,21 +18,271 @@ type RenderOptions struct {
 }
 
 func renderView(statuses []application.Status, opts RenderOptions, s styles) string {
+	ordered := prioritizeStatuses(statuses, opts.Now)
+
 	lines := []string{
 		s.title.Render("OpenAI Account Usage"),
-		s.header.Render(fmt.Sprintf("accounts: %d", len(statuses))),
+		s.header.Render(fmt.Sprintf("accounts: %d", len(ordered))),
 	}
 
-	if len(statuses) == 0 {
+	if len(ordered) == 0 {
 		lines = append(lines, s.empty.Render("No account statuses available."))
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	}
 
-	for _, status := range statuses {
+	for _, recommendation := range recommendationLines(ordered, opts.Now, s) {
+		lines = append(lines, recommendation)
+	}
+
+	for _, status := range ordered {
 		lines = append(lines, s.section.Render(renderAccount(status, opts, s)))
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
+}
+
+func recommendationLines(statuses []application.Status, now time.Time, s styles) []string {
+	for i, status := range statuses {
+		if !canUseNow(status, now) {
+			continue
+		}
+
+		lines := []string{
+			s.detail.Render(fmt.Sprintf("recommendation: use %s first", recommendationAccountLabel(status))),
+			s.detail.Render(fmt.Sprintf("details: %s", recommendationDetails(status, now))),
+		}
+
+		if next, ok := nextAvailableStatus(statuses, i+1, now); ok {
+			lines = append(lines, s.detail.Render(fmt.Sprintf("next: %s (%s)", recommendationAccountLabel(next), recommendationPrioritySnapshot(next, now))))
+		}
+
+		return lines
+	}
+
+	return []string{s.warning.Render("recommendation: no account available now (waiting for reset)")}
+}
+
+func recommendationAccountLabel(status application.Status) string {
+	name := strings.TrimSpace(status.Account.Name)
+	id := strings.TrimSpace(string(status.Account.ID))
+
+	if name == "" {
+		if id == "" {
+			return "unknown account"
+		}
+		return id
+	}
+
+	if strings.Contains(name, "@") {
+		return fmt.Sprintf("%s (%s)", name, accountClassification(status.Account.Metadata.PlanType))
+	}
+
+	if id != "" && !strings.EqualFold(name, id) {
+		return fmt.Sprintf("%s (%s)", name, id)
+	}
+
+	return name
+}
+
+func recommendationDetails(status application.Status, now time.Time) string {
+	parts := make([]string, 0, 2)
+
+	if status.WeeklyLimit != nil {
+		parts = append(parts, fmt.Sprintf("weekly %s", recommendationLimitSnapshot(status.WeeklyLimit, now)))
+	}
+
+	if status.DailyLimit != nil {
+		parts = append(parts, fmt.Sprintf("5hours %s", recommendationLimitSnapshot(status.DailyLimit, now)))
+	}
+
+	if len(parts) == 0 {
+		return "no limit snapshot available"
+	}
+
+	return strings.Join(parts, "; ")
+}
+
+func recommendationPrioritySnapshot(status application.Status, now time.Time) string {
+	if status.WeeklyLimit != nil {
+		return fmt.Sprintf("weekly %s", recommendationLimitSnapshot(status.WeeklyLimit, now))
+	}
+
+	if status.DailyLimit != nil {
+		return fmt.Sprintf("5hours %s", recommendationLimitSnapshot(status.DailyLimit, now))
+	}
+
+	return "no limit snapshot"
+}
+
+func recommendationLimitSnapshot(limit *application.StatusLimit, now time.Time) string {
+	leftPercent := limitLeftPercent(limit)
+	reset := formatResetRelative(limit.ResetsAt, now)
+
+	return fmt.Sprintf("%.0f%% left (%s)", leftPercent, reset)
+}
+
+func nextAvailableStatus(statuses []application.Status, start int, now time.Time) (application.Status, bool) {
+	for i := start; i < len(statuses); i++ {
+		if canUseNow(statuses[i], now) {
+			return statuses[i], true
+		}
+	}
+
+	return application.Status{}, false
+}
+
+type accountPriority struct {
+	availableNow      bool
+	hasWeekly         bool
+	weeklyPressure    float64
+	weeklyLeftPercent float64
+	dailyLeftPercent  float64
+	weeklyResetHours  float64
+	sortKey           string
+}
+
+func prioritizeStatuses(statuses []application.Status, now time.Time) []application.Status {
+	ordered := append([]application.Status(nil), statuses...)
+
+	slices.SortStableFunc(ordered, func(a, b application.Status) int {
+		left := buildAccountPriority(a, now)
+		right := buildAccountPriority(b, now)
+
+		if cmp := compareBoolDesc(left.availableNow, right.availableNow); cmp != 0 {
+			return cmp
+		}
+		if cmp := compareFloatDesc(left.weeklyPressure, right.weeklyPressure); cmp != 0 {
+			return cmp
+		}
+		if cmp := compareBoolDesc(left.hasWeekly, right.hasWeekly); cmp != 0 {
+			return cmp
+		}
+		if cmp := compareFloatDesc(left.weeklyLeftPercent, right.weeklyLeftPercent); cmp != 0 {
+			return cmp
+		}
+		if cmp := compareFloatDesc(left.dailyLeftPercent, right.dailyLeftPercent); cmp != 0 {
+			return cmp
+		}
+		if cmp := compareFloatAsc(left.weeklyResetHours, right.weeklyResetHours); cmp != 0 {
+			return cmp
+		}
+
+		return strings.Compare(left.sortKey, right.sortKey)
+	})
+
+	return ordered
+}
+
+func buildAccountPriority(status application.Status, now time.Time) accountPriority {
+	weeklyLeft := limitLeftPercent(status.WeeklyLimit)
+	dailyLeft := limitLeftPercent(status.DailyLimit)
+	hasWeekly := status.WeeklyLimit != nil
+	weeklyHours := weeklyResetHours(status.WeeklyLimit, now)
+	weeklyPressure := 0.0
+
+	if hasWeekly && weeklyLeft > 0 {
+		weeklyPressure = weeklyLeft / math.Max(weeklyHours, 1)
+	}
+
+	return accountPriority{
+		availableNow:      canUseNow(status, now),
+		hasWeekly:         hasWeekly,
+		weeklyPressure:    weeklyPressure,
+		weeklyLeftPercent: weeklyLeft,
+		dailyLeftPercent:  dailyLeft,
+		weeklyResetHours:  weeklyHours,
+		sortKey:           strings.ToLower(strings.TrimSpace(string(status.Account.ID) + "|" + status.Account.Name)),
+	}
+}
+
+func canUseNow(status application.Status, now time.Time) bool {
+	if limitBlocksNow(status.WeeklyLimit, now) {
+		return false
+	}
+
+	if limitBlocksNow(status.DailyLimit, now) {
+		return false
+	}
+
+	return true
+}
+
+func limitBlocksNow(limit *application.StatusLimit, now time.Time) bool {
+	if limit == nil {
+		return false
+	}
+
+	if limitLeftPercent(limit) > 0 {
+		return false
+	}
+
+	if now.IsZero() || limit.ResetsAt.IsZero() {
+		return true
+	}
+
+	return limit.ResetsAt.After(now)
+}
+
+func limitLeftPercent(limit *application.StatusLimit) float64 {
+	if limit == nil {
+		return 0
+	}
+
+	return clampPercent(100 - limit.Percent)
+}
+
+func weeklyResetHours(limit *application.StatusLimit, now time.Time) float64 {
+	const weeklyWindowHours = 7.0 * 24.0
+
+	if limit == nil {
+		return weeklyWindowHours
+	}
+
+	if now.IsZero() || limit.ResetsAt.IsZero() {
+		return weeklyWindowHours
+	}
+
+	remaining := limit.ResetsAt.Sub(now)
+	if remaining <= 0 {
+		return 1
+	}
+
+	hours := remaining.Hours()
+	if hours < 1 {
+		return 1
+	}
+
+	return hours
+}
+
+func compareBoolDesc(left, right bool) int {
+	if left == right {
+		return 0
+	}
+	if left {
+		return -1
+	}
+	return 1
+}
+
+func compareFloatDesc(left, right float64) int {
+	if math.Abs(left-right) < 1e-9 {
+		return 0
+	}
+	if left > right {
+		return -1
+	}
+	return 1
+}
+
+func compareFloatAsc(left, right float64) int {
+	if math.Abs(left-right) < 1e-9 {
+		return 0
+	}
+	if left < right {
+		return -1
+	}
+	return 1
 }
 
 func renderAccount(status application.Status, opts RenderOptions, s styles) string {
