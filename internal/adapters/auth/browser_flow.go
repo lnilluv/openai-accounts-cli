@@ -18,9 +18,10 @@ import (
 const maxTokenResponseBytes = 1 << 20
 
 var (
-	ErrStateMismatch   = errors.New("oauth callback state mismatch")
-	ErrCallbackTimeout = errors.New("timed out waiting for oauth callback")
-	ErrMissingState    = errors.New("expected state is required")
+	ErrStateMismatch       = errors.New("oauth callback state mismatch")
+	ErrCallbackTimeout     = errors.New("timed out waiting for oauth callback")
+	ErrMissingState        = errors.New("expected state is required")
+	ErrRefreshTokenInvalid = errors.New("oauth refresh token invalid")
 )
 
 type AuthorizationRequest struct {
@@ -47,6 +48,12 @@ type ExchangedTokens struct {
 	IDToken      string `json:"id_token"`
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int64  `json:"expires_in"`
+}
+
+type RefreshTokenRequest struct {
+	Issuer       string
+	ClientID     string
+	RefreshToken string
 }
 
 func NewState() (string, error) {
@@ -269,6 +276,77 @@ func ExchangeCodeForTokens(client *http.Client, req TokenExchangeRequest) (Excha
 	}
 	if tokens.AccessToken == "" || tokens.RefreshToken == "" || tokens.IDToken == "" {
 		return ExchangedTokens{}, errors.New("token response missing required fields")
+	}
+
+	return tokens, nil
+}
+
+func RefreshTokens(client *http.Client, req RefreshTokenRequest) (ExchangedTokens, error) {
+	if req.Issuer == "" {
+		return ExchangedTokens{}, errors.New("issuer is required")
+	}
+	if req.ClientID == "" {
+		return ExchangedTokens{}, errors.New("client id is required")
+	}
+	if req.RefreshToken == "" {
+		return ExchangedTokens{}, errors.New("refresh token is required")
+	}
+
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	issuer := strings.TrimRight(req.Issuer, "/")
+	endpoint := issuer + "/oauth/token"
+
+	values := url.Values{}
+	values.Set("grant_type", "refresh_token")
+	values.Set("refresh_token", req.RefreshToken)
+	values.Set("client_id", req.ClientID)
+
+	httpReq, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(values.Encode()))
+	if err != nil {
+		return ExchangedTokens{}, fmt.Errorf("create refresh token request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return ExchangedTokens{}, fmt.Errorf("refresh oauth tokens: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTokenResponseBytes))
+	if err != nil {
+		return ExchangedTokens{}, fmt.Errorf("read refresh token response: %w", err)
+	}
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		var oauthErr struct {
+			Error            string `json:"error"`
+			ErrorDescription string `json:"error_description"`
+		}
+		if unmarshalErr := json.Unmarshal(body, &oauthErr); unmarshalErr == nil {
+			detail := strings.TrimSpace(oauthErr.Error)
+			if desc := strings.TrimSpace(oauthErr.ErrorDescription); desc != "" {
+				detail += ": " + desc
+			}
+			if oauthErr.Error == "invalid_grant" {
+				return ExchangedTokens{}, fmt.Errorf("%w: %s", ErrRefreshTokenInvalid, detail)
+			}
+			if detail != "" {
+				return ExchangedTokens{}, fmt.Errorf("refresh token endpoint returned status %d: %s", resp.StatusCode, detail)
+			}
+		}
+		return ExchangedTokens{}, fmt.Errorf("refresh token endpoint returned status %d", resp.StatusCode)
+	}
+
+	var tokens ExchangedTokens
+	if err := json.Unmarshal(body, &tokens); err != nil {
+		return ExchangedTokens{}, fmt.Errorf("decode refresh token response: %w", err)
+	}
+	if tokens.AccessToken == "" {
+		return ExchangedTokens{}, errors.New("refresh response missing access_token")
 	}
 
 	return tokens, nil

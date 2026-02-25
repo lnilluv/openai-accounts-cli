@@ -310,6 +310,91 @@ func TestUsageCommandUpdatesAccountNameFromTokenEmail(t *testing.T) {
 	assert.Contains(t, stdout, "Account: email@adress.com (Team)")
 }
 
+func TestUsageCommandRefreshesExpiredAccessTokenAndRetries(t *testing.T) {
+	var oldTokenCalls int
+	var newTokenCalls int
+	var refreshCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/oauth/token":
+			refreshCalls++
+			require.Equal(t, http.MethodPost, r.Method)
+			require.NoError(t, r.ParseForm())
+			assert.Equal(t, "refresh_token", r.Form.Get("grant_type"))
+			assert.Equal(t, "test-client-id", r.Form.Get("client_id"))
+			assert.Equal(t, "refresh-token-123", r.Form.Get("refresh_token"))
+			_, _ = fmt.Fprint(w, `{"access_token":"new-token","refresh_token":"refresh-token-456","id_token":"","token_type":"Bearer","expires_in":3600}`)
+		case r.URL.Path == "/wham/usage":
+			authz := r.Header.Get("Authorization")
+			if authz == "Bearer old-token" {
+				oldTokenCalls++
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = fmt.Fprint(w, `{"error":"invalid_token"}`)
+				return
+			}
+			assert.Equal(t, "Bearer new-token", authz)
+			newTokenCalls++
+			_, _ = fmt.Fprint(w, `{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":21,"limit_window_seconds":18000,"reset_at":1893456000},"secondary_window":{"used_percent":47,"limit_window_seconds":604800,"reset_at":1893888000}}}`)
+		case r.URL.Path == "/subscriptions":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("OA_USAGE_BASE_URL", server.URL)
+	t.Setenv("OA_AUTH_ISSUER", server.URL)
+	t.Setenv("OA_AUTH_CLIENT_ID", "test-client-id")
+
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixture(home))
+
+	_, _, err := executeCLI(t, home,
+		"auth", "set",
+		"--account", "acc-1",
+		"--method", "chatgpt",
+		"--secret-key", "openai://acc-1/oauth_tokens",
+		"--secret-value", `{"access_token":"old-token","refresh_token":"refresh-token-123","id_token":"","expires_at":1}`,
+	)
+	require.NoError(t, err)
+
+	stdout, _, err := executeCLI(t, home, "usage", "--account", "acc-1")
+	require.NoError(t, err)
+	assert.LessOrEqual(t, oldTokenCalls, 1)
+	assert.GreaterOrEqual(t, refreshCalls, 1)
+	assert.GreaterOrEqual(t, newTokenCalls, 1)
+	assert.Contains(t, stdout, "5hours limit:")
+}
+
+func TestUsageCommandExpiredErrorIncludesEmailAndType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = fmt.Fprint(w, `{"error":"invalid_token"}`)
+	}))
+	defer server.Close()
+
+	t.Setenv("OA_USAGE_BASE_URL", server.URL)
+
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixture(home))
+
+	idToken := fakeJWT(`{"email":"email@adress.com"}`)
+	_, _, err := executeCLI(t, home,
+		"auth", "set",
+		"--account", "acc-1",
+		"--method", "chatgpt",
+		"--secret-key", "openai://acc-1/oauth_tokens",
+		"--secret-value", fmt.Sprintf(`{"access_token":"bad-token","id_token":"%s"}`, idToken),
+	)
+	require.NoError(t, err)
+
+	_, stderr, err := executeCLI(t, home, "usage", "--account", "acc-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "account acc-1 (email@adress.com, Unknown): session expired")
+	assert.Contains(t, stderr, "account acc-1 (email@adress.com, Unknown): session expired")
+}
+
 func TestUsageCommandFetchesSubscriptionAndRendersRenewal(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -107,25 +106,19 @@ func runBrowserLogin(cmd *cobra.Command, app *app, accountID domain.AccountID) e
 		return fmt.Errorf("exchange code for tokens: %w", err)
 	}
 
-	secretValueBytes, err := json.Marshal(struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		IDToken      string `json:"id_token"`
-		TokenType    string `json:"token_type,omitempty"`
-		ExpiresIn    int64  `json:"expires_in,omitempty"`
-	}{
+	secretValue, err := encodeOAuthTokens(withCalculatedExpiry(oauthTokens{
 		AccessToken:  tokens.AccessToken,
 		RefreshToken: tokens.RefreshToken,
 		IDToken:      tokens.IDToken,
 		TokenType:    tokens.TokenType,
 		ExpiresIn:    tokens.ExpiresIn,
-	})
+	}, app.now()))
 	if err != nil {
-		return fmt.Errorf("encode oauth tokens: %w", err)
+		return err
 	}
 
 	secretKey := fmt.Sprintf("openai://%s/oauth_tokens", accountID)
-	if err := app.service.SetAuth(cmd.Context(), accountID, domain.AuthMethodChatGPT, secretKey, string(secretValueBytes)); err != nil {
+	if err := app.service.SetAuth(cmd.Context(), accountID, domain.AuthMethodChatGPT, secretKey, secretValue); err != nil {
 		return fmt.Errorf("save account oauth auth: %w", err)
 	}
 

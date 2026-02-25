@@ -165,3 +165,46 @@ func TestExchangeCodeForTokensReturnsErrorForFailureStatus(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "token endpoint returned status"))
 }
+
+func TestRefreshTokensSuccess(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.NoError(t, r.ParseForm())
+		assert.Equal(t, "refresh_token", r.Form.Get("grant_type"))
+		assert.Equal(t, "client-123", r.Form.Get("client_id"))
+		assert.Equal(t, "refresh-abc", r.Form.Get("refresh_token"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"at2","refresh_token":"rt2","id_token":"it2","token_type":"Bearer","expires_in":3600}`))
+	}))
+	defer server.Close()
+
+	tokens, err := RefreshTokens(http.DefaultClient, RefreshTokenRequest{
+		Issuer:       server.URL,
+		ClientID:     "client-123",
+		RefreshToken: "refresh-abc",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "at2", tokens.AccessToken)
+	assert.Equal(t, "rt2", tokens.RefreshToken)
+	assert.Equal(t, "it2", tokens.IDToken)
+}
+
+func TestRefreshTokensReturnsInvalidGrantSentinel(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"expired"}`))
+	}))
+	defer server.Close()
+
+	_, err := RefreshTokens(http.DefaultClient, RefreshTokenRequest{
+		Issuer:       server.URL,
+		ClientID:     "client-123",
+		RefreshToken: "refresh-abc",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrRefreshTokenInvalid)
+}

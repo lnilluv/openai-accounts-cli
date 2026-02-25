@@ -94,3 +94,23 @@ func TestCompactNumberBoundaries(t *testing.T) {
 		})
 	}
 }
+
+func TestAccountClassification(t *testing.T) {
+	tests := []struct {
+		name     string
+		planType string
+		want     string
+	}{
+		{name: "team", planType: "team", want: "Team"},
+		{name: "business", planType: "business", want: "Business"},
+		{name: "enterprise", planType: "enterprise", want: "Business"},
+		{name: "empty", planType: "", want: "Unknown"},
+		{name: "other", planType: "plus", want: "Personal"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, AccountClassification(tt.planType))
+		})
+	}
+}

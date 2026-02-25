@@ -74,7 +74,7 @@ func recommendationAccountLabel(status application.Status) string {
 	}
 
 	if strings.Contains(name, "@") {
-		return fmt.Sprintf("%s (%s)", name, accountClassification(status.Account.Metadata.PlanType))
+		return fmt.Sprintf("%s (%s)", name, domain.AccountClassification(status.Account.Metadata.PlanType))
 	}
 
 	if id != "" && !strings.EqualFold(name, id) {
@@ -466,21 +466,10 @@ func formatResetRelative(resetsAt, now time.Time) string {
 func accountTitle(name string, id domain.AccountID, planType string) string {
 	trimmed := strings.TrimSpace(name)
 	if strings.Contains(trimmed, "@") {
-		classification := accountClassification(planType)
+		classification := domain.AccountClassification(planType)
 		return fmt.Sprintf("Account: %s (%s)", trimmed, classification)
 	}
 	return fmt.Sprintf("%s (%s)", trimmed, id)
-}
-
-func accountClassification(planType string) string {
-	switch strings.ToLower(strings.TrimSpace(planType)) {
-	case "team":
-		return "Team"
-	case "business", "enterprise", "education", "edu", "k12", "quorum", "free_workspace":
-		return "Business"
-	default:
-		return "Personal"
-	}
 }
 
 func windowLabel(window application.LimitWindowKind) string {

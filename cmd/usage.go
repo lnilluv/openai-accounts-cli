@@ -12,12 +12,14 @@ import (
 	"sync"
 	"time"
 
+	authadapter "github.com/bnema/openai-accounts-cli/internal/adapters/auth"
 	"github.com/bnema/openai-accounts-cli/internal/application"
 	"github.com/bnema/openai-accounts-cli/internal/domain"
 	"github.com/spf13/cobra"
 )
 
 var errUsageSessionExpired = errors.New("usage session expired")
+var refreshLocks sync.Map
 
 func newUsageCmd(app *app) *cobra.Command {
 	var accountID string
@@ -37,11 +39,6 @@ func newUsageCmd(app *app) *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Render JSON output")
 
 	return cmd
-}
-
-type oauthTokens struct {
-	AccessToken string `json:"access_token"`
-	IDToken     string `json:"id_token"`
 }
 
 type tokenClaims struct {
@@ -175,7 +172,7 @@ func fetchAccountsConcurrently(ctx context.Context, app *app, accounts []domain.
 	if len(failures) > 0 {
 		fmt.Fprintln(errWriter, "\nFailed to fetch:")
 		for _, failure := range failures {
-			fmt.Fprintf(errWriter, "  - %s: %v\n", failure.accountID, failure.err)
+			fmt.Fprintf(errWriter, "  - %v\n", failure.err)
 		}
 	}
 
@@ -236,12 +233,17 @@ func fetchAndPersistLimitsUncached(ctx context.Context, app *app, account domain
 		return fmt.Errorf("account %s: load auth secret: %w", account.ID, err)
 	}
 
-	var tokens oauthTokens
-	if err := json.Unmarshal([]byte(secretValue), &tokens); err != nil {
-		return fmt.Errorf("account %s: decode oauth tokens: %w", account.ID, err)
+	tokens, err := decodeOAuthTokens(secretValue)
+	if err != nil {
+		return fmt.Errorf("account %s: %w", account.ID, err)
 	}
-	if strings.TrimSpace(tokens.AccessToken) == "" {
-		return fmt.Errorf("account %s: oauth tokens missing access_token", account.ID)
+
+	tokens, err = ensureFreshTokens(ctx, app, account, tokens, false)
+	if err != nil {
+		if errors.Is(err, authadapter.ErrRefreshTokenInvalid) {
+			return fmt.Errorf("%s: session expired, please re-login with `oa auth login browser --account %s`", usageAccountLabel(account, tokens), account.ID)
+		}
+		return fmt.Errorf("account %s: refresh oauth tokens: %w", account.ID, err)
 	}
 
 	claims := parseTokenClaims(tokens.IDToken)
@@ -249,9 +251,27 @@ func fetchAndPersistLimitsUncached(ctx context.Context, app *app, account domain
 	payload, err := fetchUsagePayload(ctx, app.httpClient, app.usageBaseURL, tokens)
 	if err != nil {
 		if errors.Is(err, errUsageSessionExpired) {
-			return fmt.Errorf("account %s: session expired, please re-login with `oa auth login browser --account %s`", account.ID, account.ID)
+			staleToken := tokens.AccessToken
+			tokens, err = ensureFreshTokens(ctx, app, account, tokens, true)
+			if err != nil {
+				if errors.Is(err, authadapter.ErrRefreshTokenInvalid) {
+					return fmt.Errorf("%s: session expired, please re-login with `oa auth login browser --account %s`", usageAccountLabel(account, tokens), account.ID)
+				}
+				return fmt.Errorf("account %s: refresh oauth tokens after unauthorized usage response: %w", account.ID, err)
+			}
+			if strings.TrimSpace(tokens.AccessToken) == strings.TrimSpace(staleToken) {
+				return fmt.Errorf("%s: session expired, please re-login with `oa auth login browser --account %s`", usageAccountLabel(account, tokens), account.ID)
+			}
+			payload, err = fetchUsagePayload(ctx, app.httpClient, app.usageBaseURL, tokens)
+			if err != nil {
+				if errors.Is(err, errUsageSessionExpired) {
+					return fmt.Errorf("%s: session expired, please re-login with `oa auth login browser --account %s`", usageAccountLabel(account, tokens), account.ID)
+				}
+				return fmt.Errorf("account %s: fetch usage after refresh: %w", account.ID, err)
+			}
+		} else {
+			return fmt.Errorf("account %s: fetch usage: %w", account.ID, err)
 		}
-		return fmt.Errorf("account %s: fetch usage: %w", account.ID, err)
 	}
 
 	daily, weekly := pickDailyWeeklyWindows(payload)
@@ -284,6 +304,13 @@ func fetchAndPersistLimitsUncached(ctx context.Context, app *app, account domain
 	}
 
 	subPayload, subErr := fetchSubscriptionPayload(ctx, app.httpClient, app.usageBaseURL, tokens)
+	if errors.Is(subErr, errUsageSessionExpired) {
+		staleToken := tokens.AccessToken
+		tokens, err = ensureFreshTokens(ctx, app, account, tokens, true)
+		if err == nil && strings.TrimSpace(tokens.AccessToken) != strings.TrimSpace(staleToken) {
+			subPayload, subErr = fetchSubscriptionPayload(ctx, app.httpClient, app.usageBaseURL, tokens)
+		}
+	}
 	if subErr == nil {
 		activeStart, _ := time.Parse(time.RFC3339, subPayload.ActiveStart)
 		activeUntil, _ := time.Parse(time.RFC3339, subPayload.ActiveUntil)
@@ -378,6 +405,93 @@ func fetchSubscriptionPayload(ctx context.Context, client *http.Client, baseURL 
 	}
 
 	return payload, nil
+}
+
+func ensureFreshTokens(ctx context.Context, app *app, account domain.Account, existing oauthTokens, force bool) (oauthTokens, error) {
+	const proactiveRefreshSkew = 2 * time.Minute
+	secretRef := strings.TrimSpace(account.Auth.SecretRef)
+	if secretRef == "" {
+		return existing, fmt.Errorf("account %s: auth secret reference is empty", account.ID)
+	}
+
+	staleAccessToken := strings.TrimSpace(existing.AccessToken)
+
+	lock := lockForSecretRef(secretRef)
+	lock.Lock()
+	defer lock.Unlock()
+
+	storedValue, err := app.secretStore.Get(ctx, secretRef)
+	if err != nil {
+		return existing, fmt.Errorf("account %s: load auth secret for refresh: %w", account.ID, err)
+	}
+	storedTokens, err := decodeOAuthTokens(storedValue)
+	if err != nil {
+		return existing, fmt.Errorf("account %s: %w", account.ID, err)
+	}
+
+	if force {
+		if staleAccessToken != "" && strings.TrimSpace(storedTokens.AccessToken) != "" && strings.TrimSpace(storedTokens.AccessToken) != staleAccessToken {
+			return storedTokens, nil
+		}
+	} else if !tokenExpiringSoon(storedTokens, app.now(), proactiveRefreshSkew) {
+		return storedTokens, nil
+	}
+
+	if strings.TrimSpace(storedTokens.RefreshToken) == "" {
+		return storedTokens, fmt.Errorf("%w: refresh_token missing", authadapter.ErrRefreshTokenInvalid)
+	}
+
+	refreshed, err := authadapter.RefreshTokens(app.httpClient, authadapter.RefreshTokenRequest{
+		Issuer:       app.browserLogin.Issuer,
+		ClientID:     app.browserLogin.ClientID,
+		RefreshToken: storedTokens.RefreshToken,
+	})
+	if err != nil {
+		return storedTokens, err
+	}
+
+	updated := oauthTokens{
+		AccessToken:  refreshed.AccessToken,
+		RefreshToken: refreshed.RefreshToken,
+		IDToken:      refreshed.IDToken,
+		TokenType:    refreshed.TokenType,
+		ExpiresIn:    refreshed.ExpiresIn,
+	}
+	if strings.TrimSpace(updated.RefreshToken) == "" {
+		updated.RefreshToken = storedTokens.RefreshToken
+	}
+	if strings.TrimSpace(updated.IDToken) == "" {
+		updated.IDToken = storedTokens.IDToken
+	}
+	updated = withCalculatedExpiry(updated, app.now())
+
+	encoded, err := encodeOAuthTokens(updated)
+	if err != nil {
+		return storedTokens, err
+	}
+	if err := app.secretStore.Put(ctx, secretRef, encoded); err != nil {
+		return storedTokens, fmt.Errorf("account %s: persist refreshed oauth tokens: %w", account.ID, err)
+	}
+
+	return updated, nil
+}
+
+func lockForSecretRef(secretRef string) *sync.Mutex {
+	lock, _ := refreshLocks.LoadOrStore(secretRef, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
+func usageAccountLabel(account domain.Account, tokens oauthTokens) string {
+	email := strings.TrimSpace(parseTokenClaims(tokens.IDToken).Email)
+	if email == "" {
+		email = strings.TrimSpace(account.Name)
+	}
+	classification := domain.AccountClassification(account.Metadata.PlanType)
+	id := strings.TrimSpace(string(account.ID))
+	if email == "" {
+		return fmt.Sprintf("account %s", id)
+	}
+	return fmt.Sprintf("account %s (%s, %s)", id, email, classification)
 }
 
 func accountIDFromToken(token string) string {
