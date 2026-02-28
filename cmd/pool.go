@@ -77,6 +77,11 @@ func newPoolStatusCmd(app *app) *cobra.Command {
 
 			members := make([]string, 0, len(pool.Members))
 			for _, member := range pool.Members {
+				status, statusErr := app.service.GetStatus(cmd.Context(), member)
+				if statusErr == nil && strings.TrimSpace(status.Account.Name) != "" {
+					members = append(members, status.Account.Name)
+					continue
+				}
 				members = append(members, string(member))
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "members: %s\n", strings.Join(members, ", "))

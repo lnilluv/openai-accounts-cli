@@ -441,7 +441,7 @@ func TestPoolActivateCreatesDefaultPool(t *testing.T) {
 
 func TestPoolStatusReportsPoolState(t *testing.T) {
 	home := t.TempDir()
-	require.NoError(t, writeAccountsFixture(home))
+	require.NoError(t, writeAccountsFixtureWithTwoNamedAccounts(home))
 
 	_, _, err := executeCLI(t, home, "pool", "activate")
 	require.NoError(t, err)
@@ -450,7 +450,8 @@ func TestPoolStatusReportsPoolState(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, stdout, "pool: default-openai")
 	assert.Contains(t, stdout, "active: true")
-	assert.Contains(t, stdout, "members: acc-1")
+	assert.Contains(t, stdout, "members: chatgpt@nilluv.com")
+	assert.Contains(t, stdout, "members: chatgpt@nilluv.com, chatgpt+alt@nilluv.com")
 }
 
 func TestPoolDeactivateDisablesDefaultPool(t *testing.T) {
@@ -567,6 +568,42 @@ secret_ref = "openai://acc-1/oauth_tokens"
 [accounts.auth]
 method = "chatgpt"
 secret_ref = "openai://acc-1/oauth_tokens"
+`
+
+	return os.WriteFile(filepath.Join(configDir, "accounts.toml"), []byte(accounts), 0o644)
+}
+
+func writeAccountsFixtureWithTwoNamedAccounts(home string) error {
+	configDir := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return err
+	}
+
+	accounts := `version = 1
+
+[[accounts]]
+id = "1"
+name = "chatgpt@nilluv.com"
+
+[accounts.metadata]
+provider = "openai"
+model = "gpt-5"
+
+[accounts.auth]
+method = ""
+secret_ref = ""
+
+[[accounts]]
+id = "2"
+name = "chatgpt+alt@nilluv.com"
+
+[accounts.metadata]
+provider = "openai"
+model = "gpt-5"
+
+[accounts.auth]
+method = ""
+secret_ref = ""
 `
 
 	return os.WriteFile(filepath.Join(configDir, "accounts.toml"), []byte(accounts), 0o644)
