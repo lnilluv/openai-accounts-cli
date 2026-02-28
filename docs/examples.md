@@ -92,6 +92,24 @@ Show pool status:
 go run . pool status
 ```
 
+Switch to the next eligible account in pool order:
+
+```bash
+go run . pool next
+```
+
+Switch to a specific eligible account:
+
+```bash
+go run . pool switch --account 2
+```
+
+Interactive switch (choose from numbered eligible accounts):
+
+```bash
+go run . pool switch
+```
+
 Deactivate the default pool:
 
 ```bash

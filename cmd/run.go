@@ -25,8 +25,30 @@ func newRunCmd(app *app) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			picked, _, err := app.poolService.PickAccount(cmd.Context(), domain.PoolID(poolID))
+			var picked domain.AccountID
+
+			active, err := app.continuityService.GetActiveAccountID(cmd.Context(), domain.PoolID(poolID))
 			if err != nil {
+				return err
+			}
+			if active != "" {
+				eligible, err := app.poolService.IsEligibleAccount(cmd.Context(), domain.PoolID(poolID), active)
+				if err != nil {
+					return err
+				}
+				if eligible {
+					picked = active
+				}
+			}
+
+			if picked == "" {
+				picked, _, err = app.poolService.PickAccount(cmd.Context(), domain.PoolID(poolID))
+				if err != nil {
+					return err
+				}
+			}
+
+			if err := app.continuityService.SetActiveAccountID(cmd.Context(), domain.PoolID(poolID), picked); err != nil {
 				return err
 			}
 

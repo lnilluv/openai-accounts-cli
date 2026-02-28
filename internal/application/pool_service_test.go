@@ -100,6 +100,60 @@ func TestPoolServicePickAccountFailsWhenPoolIsInactive(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrPoolInactive)
 }
 
+func TestPoolServiceEligibleAccountsKeepsPoolOrderAndSkipsExhausted(t *testing.T) {
+	t.Parallel()
+
+	repo := &inMemoryAccountRepo{accounts: []domain.Account{
+		{ID: "1", Metadata: domain.AccountMetadata{Provider: "openai"}, Limits: domain.AccountLimitSnapshots{Weekly: &domain.AccountLimitSnapshot{Percent: 10}}},
+		{ID: "2", Metadata: domain.AccountMetadata{Provider: "openai"}, Limits: domain.AccountLimitSnapshots{Weekly: &domain.AccountLimitSnapshot{Percent: 100}}},
+		{ID: "3", Metadata: domain.AccountMetadata{Provider: "openai"}, Limits: domain.AccountLimitSnapshots{Weekly: &domain.AccountLimitSnapshot{Percent: 60}}},
+	}}
+	pools := &inMemoryPoolRepo{pools: map[domain.PoolID]domain.Pool{
+		"default-openai": {
+			ID:       "default-openai",
+			Provider: domain.ProviderOpenAI,
+			Active:   true,
+			Members:  []domain.AccountID{"3", "2", "1"},
+		},
+	}}
+
+	svc := NewPoolService(repo, pools, nil)
+
+	accounts, err := svc.EligibleAccounts(context.Background(), "default-openai")
+	require.NoError(t, err)
+	require.Len(t, accounts, 2)
+	assert.Equal(t, domain.AccountID("3"), accounts[0].ID)
+	assert.Equal(t, domain.AccountID("1"), accounts[1].ID)
+}
+
+func TestPoolServiceNextAccountRotatesInEligibleOrder(t *testing.T) {
+	t.Parallel()
+
+	repo := &inMemoryAccountRepo{accounts: []domain.Account{
+		{ID: "1", Metadata: domain.AccountMetadata{Provider: "openai"}},
+		{ID: "2", Metadata: domain.AccountMetadata{Provider: "openai"}},
+		{ID: "3", Metadata: domain.AccountMetadata{Provider: "openai"}},
+	}}
+	pools := &inMemoryPoolRepo{pools: map[domain.PoolID]domain.Pool{
+		"default-openai": {
+			ID:       "default-openai",
+			Provider: domain.ProviderOpenAI,
+			Active:   true,
+			Members:  []domain.AccountID{"1", "2", "3"},
+		},
+	}}
+
+	svc := NewPoolService(repo, pools, nil)
+
+	next, err := svc.NextAccount(context.Background(), "default-openai", "1")
+	require.NoError(t, err)
+	assert.Equal(t, domain.AccountID("2"), next)
+
+	wrapped, err := svc.NextAccount(context.Background(), "default-openai", "3")
+	require.NoError(t, err)
+	assert.Equal(t, domain.AccountID("1"), wrapped)
+}
+
 type inMemoryPoolRepo struct {
 	pools map[domain.PoolID]domain.Pool
 }

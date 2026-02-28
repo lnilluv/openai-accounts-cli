@@ -76,6 +76,15 @@ oa pool activate
 # Show pool status
 oa pool status
 
+# Switch manually to next eligible account
+oa pool next
+
+# Switch to specific account by ID or name
+oa pool switch --account 2
+
+# Interactive switch (shows numbered eligible accounts)
+oa pool switch
+
 # Run opencode with auto-selected account from pool
 oa run --pool default-openai -- opencode
 
@@ -92,7 +101,7 @@ OA_WINDOW_FINGERPRINT=project-a-window-1 oa run --pool default-openai -- opencod
 | `oa usage [--account <id>] [--json]` | Fetch usage limits and subscription renewal info (all accounts if no ID specified) |
 | `oa status [--account <id>] [--json]` | Alias for usage |
 | `oa account list` | List accounts |
-| `oa pool activate\|deactivate\|status` | Manage default OpenAI pool state |
+| `oa pool activate\|deactivate\|status\|next\|switch` | Manage default OpenAI pool state and selected account |
 | `oa run --pool <id> -- <cmd>` | Run a command with pool-selected account and session env |
 | `oa version` | Print version |
 
