@@ -68,6 +68,7 @@ func TestPoolServicePickAccountSkipsExhausted(t *testing.T) {
 		"default-openai": {
 			ID:       "default-openai",
 			Provider: domain.ProviderOpenAI,
+			Active:   true,
 			Members:  []domain.AccountID{"1", "2", "3"},
 		},
 	}}
@@ -77,6 +78,26 @@ func TestPoolServicePickAccountSkipsExhausted(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, domain.AccountID("3"), picked)
 	assert.Equal(t, []domain.AccountID{"2"}, failover)
+}
+
+func TestPoolServicePickAccountFailsWhenPoolIsInactive(t *testing.T) {
+	t.Parallel()
+
+	repo := &inMemoryAccountRepo{accounts: []domain.Account{
+		{ID: "1", Metadata: domain.AccountMetadata{Provider: "openai"}},
+	}}
+	pools := &inMemoryPoolRepo{pools: map[domain.PoolID]domain.Pool{
+		"default-openai": {
+			ID:       "default-openai",
+			Provider: domain.ProviderOpenAI,
+			Active:   false,
+			Members:  []domain.AccountID{"1"},
+		},
+	}}
+	svc := NewPoolService(repo, pools, nil)
+
+	_, _, err := svc.PickAccount(context.Background(), "default-openai")
+	require.ErrorIs(t, err, domain.ErrPoolInactive)
 }
 
 type inMemoryPoolRepo struct {

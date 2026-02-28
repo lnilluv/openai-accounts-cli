@@ -43,7 +43,9 @@ func TestSessionContinuityBootstrapsMissingSessionAndSavesMemory(t *testing.T) {
 
 	sessionID, bootstrapped, err := svc.GetOrAttachAccountSession(context.Background(), "default-openai", "proj-a", "3")
 	require.NoError(t, err)
-	assert.Equal(t, "proj-a:3", sessionID)
+	assert.NotEqual(t, "proj-a:3", sessionID)
+	assert.NotContains(t, sessionID, "proj-a")
+	assert.NotContains(t, sessionID, ":3")
 	assert.True(t, bootstrapped)
 
 	err = svc.UpdateMemoryPacket(context.Background(), "default-openai", "proj-a", domain.MemoryPacket{
@@ -57,7 +59,7 @@ func TestSessionContinuityBootstrapsMissingSessionAndSavesMemory(t *testing.T) {
 	runtime, err := repo.GetByPoolID(context.Background(), "default-openai")
 	require.NoError(t, err)
 	ledger := runtime.Sessions["proj-a"]
-	assert.Equal(t, "proj-a:3", ledger.AccountSessions["3"])
+	assert.Equal(t, sessionID, ledger.AccountSessions["3"])
 	assert.Equal(t, "working on api", ledger.Memory.Summary)
 	require.False(t, ledger.Memory.UpdatedAt.IsZero())
 }

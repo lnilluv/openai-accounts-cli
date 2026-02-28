@@ -86,6 +86,9 @@ func (s *PoolService) PickAccount(ctx context.Context, poolID domain.PoolID) (do
 	if err != nil {
 		return "", nil, err
 	}
+	if !pool.Active {
+		return "", nil, domain.ErrPoolInactive
+	}
 
 	accounts, err := s.accounts.List(ctx)
 	if err != nil {
