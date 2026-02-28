@@ -13,8 +13,9 @@ import (
 )
 
 type RenderOptions struct {
-	Now        time.Time
-	StaleAfter time.Duration
+	Now             time.Time
+	StaleAfter      time.Duration
+	ActiveAccountID domain.AccountID
 }
 
 func renderView(statuses []application.Status, opts RenderOptions, s styles) string {
@@ -292,7 +293,7 @@ func renderAccount(status application.Status, opts RenderOptions, s styles) stri
 	}
 
 	parts := []string{
-		titleStyle.Render(accountTitle(status.Account.Name, status.Account.ID, status.Account.Metadata.PlanType)),
+		titleStyle.Render(accountTitle(status.Account.Name, status.Account.ID, status.Account.Metadata.PlanType, status.Account.ID == opts.ActiveAccountID)),
 	}
 
 	for _, line := range limitLines(status, opts, s) {
@@ -463,11 +464,18 @@ func formatResetRelative(resetsAt, now time.Time) string {
 	return fmt.Sprintf("resets in %d %s (%s)", days, suffix, resetsAt.Format("15:04 on 02 Jan"))
 }
 
-func accountTitle(name string, id domain.AccountID, planType string) string {
+func accountTitle(name string, id domain.AccountID, planType string, active bool) string {
 	trimmed := strings.TrimSpace(name)
+	activeSuffix := ""
+	if active {
+		activeSuffix = ", Active"
+	}
 	if strings.Contains(trimmed, "@") {
 		classification := domain.AccountClassification(planType)
-		return fmt.Sprintf("Account: %s (%s)", trimmed, classification)
+		return fmt.Sprintf("Account: %s (%s%s)", trimmed, classification, activeSuffix)
+	}
+	if active {
+		return fmt.Sprintf("%s (%s, Active)", trimmed, id)
 	}
 	return fmt.Sprintf("%s (%s)", trimmed, id)
 }

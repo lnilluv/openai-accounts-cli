@@ -250,3 +250,32 @@ func TestRenderPrioritizesAccountsForWeeklyUsage(t *testing.T) {
 	assert.Less(t, bestIndex, midIndex)
 	assert.Less(t, midIndex, blockedIndex)
 }
+
+func TestRenderMarksActiveAccountInTitle(t *testing.T) {
+	now := time.Date(2026, 2, 14, 11, 0, 0, 0, time.UTC)
+
+	output, err := Render([]application.Status{
+		{
+			Account: domain.Account{ID: "acc-1", Name: "active@example.com", Auth: domain.Auth{Method: domain.AuthMethodChatGPT}},
+			DailyLimit: &application.StatusLimit{
+				Window:     application.LimitWindowDaily,
+				Percent:    20,
+				ResetsAt:   now.Add(5 * time.Hour),
+				CapturedAt: now,
+			},
+		},
+		{
+			Account: domain.Account{ID: "acc-2", Name: "other@example.com", Auth: domain.Auth{Method: domain.AuthMethodChatGPT}},
+			DailyLimit: &application.StatusLimit{
+				Window:     application.LimitWindowDaily,
+				Percent:    10,
+				ResetsAt:   now.Add(5 * time.Hour),
+				CapturedAt: now,
+			},
+		},
+	}, RenderOptions{Now: now, StaleAfter: 6 * time.Hour, ActiveAccountID: "acc-1"})
+
+	require.NoError(t, err)
+	assert.Contains(t, output, "Account: active@example.com (Unknown, Active)")
+	assert.Contains(t, output, "Account: other@example.com (Unknown)")
+}

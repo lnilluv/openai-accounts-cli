@@ -128,3 +128,7 @@ OA_WINDOW_FINGERPRINT=project-a-window-1 oa run --pool default-openai -- opencod
 ```bash
 go test ./...
 ```
+
+## Roadmap Notes
+
+- See `docs/TODO.md` for planned improvements (including custom pool creation for personal/pro account rotation).

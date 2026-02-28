@@ -559,6 +559,22 @@ func TestRunUsesSwitchedAccountWhenSet(t *testing.T) {
 	assert.Equal(t, "2", strings.TrimSpace(stdout))
 }
 
+func TestStatusMarksActiveAccountInTitle(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixtureWithTwoNamedAccounts(home))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+
+	_, _, err = executeCLI(t, home, "pool", "switch", "--account", "2")
+	require.NoError(t, err)
+
+	stdout, _, err := executeCLI(t, home, "status")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Account: chatgpt+alt@nilluv.com (Unknown, Active)")
+	assert.Contains(t, stdout, "Account: chatgpt@nilluv.com (Unknown)")
+}
+
 func TestRunUsesSelectedPoolAccountInChildEnv(t *testing.T) {
 	home := t.TempDir()
 	require.NoError(t, writeAccountsFixture(home))
