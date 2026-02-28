@@ -11,6 +11,8 @@
 - Shows subscription renewal countdown (when the subscription renews or expires)
 - Highlights accounts with exhausted weekly limits
 - Recommends which account to use first (prioritizes by weekly usage pressure)
+- Creates and manages a default OpenAI account pool for auto-switching
+- Runs child tools (like opencode) with pool-selected account/session env
 - Renders human-readable or JSON output
 
 ## Install
@@ -36,6 +38,15 @@ oa usage --account 1
 
 # JSON output
 oa status --account 1 --json
+
+# Activate default pool (auto-discovers OpenAI accounts)
+oa pool activate
+
+# Show pool status
+oa pool status
+
+# Run opencode with auto-selected account from pool
+oa run --pool default-openai -- opencode
 ```
 
 ## Commands
@@ -47,6 +58,8 @@ oa status --account 1 --json
 | `oa usage [--account <id>] [--json]` | Fetch usage limits and subscription renewal info (all accounts if no ID specified) |
 | `oa status [--account <id>] [--json]` | Alias for usage |
 | `oa account list` | List accounts |
+| `oa pool activate\|deactivate\|status` | Manage default OpenAI pool state |
+| `oa run --pool <id> -- <cmd>` | Run a command with pool-selected account and session env |
 | `oa version` | Print version |
 
 ## Configuration
@@ -57,6 +70,7 @@ oa status --account 1 --json
 | `OA_AUTH_CLIENT_ID` | Embedded in source | OAuth client identifier |
 | `OA_AUTH_LISTEN` | `127.0.0.1:1455` | Local listener address |
 | `OA_USAGE_BASE_URL` | `https://chatgpt.com/backend-api` | Usage API base URL |
+| `OA_WINDOW_FINGERPRINT` | `default` | Window/session fingerprint for pool continuity |
 
 ## Project layout
 

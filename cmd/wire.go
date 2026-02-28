@@ -19,13 +19,15 @@ import (
 var errNotImplementedYet = errors.New("not implemented yet")
 
 type app struct {
-	service        *application.Service
-	secretStore    ports.SecretStore
-	statusRenderer func([]application.Status, statusadapter.RenderOptions) (string, error)
-	browserLogin   browserLoginConfig
-	usageBaseURL   string
-	httpClient     *http.Client
-	now            func() time.Time
+	service           *application.Service
+	poolService       *application.PoolService
+	continuityService *application.SessionContinuityService
+	secretStore       ports.SecretStore
+	statusRenderer    func([]application.Status, statusadapter.RenderOptions) (string, error)
+	browserLogin      browserLoginConfig
+	usageBaseURL      string
+	httpClient        *http.Client
+	now               func() time.Time
 }
 
 type browserLoginConfig struct {
@@ -41,6 +43,16 @@ func wireApp() (*app, error) {
 		return nil, fmt.Errorf("wire account repository: %w", err)
 	}
 
+	poolRepo, err := tomlrepo.NewPoolRepository(viper.New())
+	if err != nil {
+		return nil, fmt.Errorf("wire pool repository: %w", err)
+	}
+
+	poolRuntimeRepo, err := tomlrepo.NewPoolRuntimeRepository(viper.New())
+	if err != nil {
+		return nil, fmt.Errorf("wire pool runtime repository: %w", err)
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolve home directory: %w", err)
@@ -52,9 +64,11 @@ func wireApp() (*app, error) {
 	}
 
 	return &app{
-		service:        application.NewService(repo, secretStore, ports.SystemClock{}),
-		secretStore:    secretStore,
-		statusRenderer: statusadapter.Render,
+		service:           application.NewService(repo, secretStore, ports.SystemClock{}),
+		poolService:       application.NewPoolService(repo, poolRepo, ports.SystemClock{}),
+		continuityService: application.NewSessionContinuityService(poolRuntimeRepo, ports.SystemClock{}),
+		secretStore:       secretStore,
+		statusRenderer:    statusadapter.Render,
 		browserLogin: browserLoginConfig{
 			Issuer:     envOrDefault("OA_AUTH_ISSUER", "https://auth.openai.com"),
 			ClientID:   envOrDefault("OA_AUTH_CLIENT_ID", "app_EMoamEEZ73f0CkXaXp7hrann"),
@@ -66,7 +80,6 @@ func wireApp() (*app, error) {
 		now:          time.Now,
 	}, nil
 }
-
 func envOrDefault(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value

@@ -429,6 +429,85 @@ func TestUsageCommandFetchesSubscriptionAndRendersRenewal(t *testing.T) {
 	assert.Contains(t, stdout, "14 Mar")
 }
 
+func TestPoolActivateCreatesDefaultPool(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixture(home))
+
+	stdout, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Activated pool default-openai")
+	assert.Contains(t, stdout, "members: 1")
+}
+
+func TestPoolStatusReportsPoolState(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixture(home))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+
+	stdout, _, err := executeCLI(t, home, "pool", "status")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "pool: default-openai")
+	assert.Contains(t, stdout, "active: true")
+	assert.Contains(t, stdout, "members: acc-1")
+}
+
+func TestPoolDeactivateDisablesDefaultPool(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixture(home))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+
+	stdout, _, err := executeCLI(t, home, "pool", "deactivate")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Deactivated pool default-openai")
+
+	statusOut, _, err := executeCLI(t, home, "pool", "status")
+	require.NoError(t, err)
+	assert.Contains(t, statusOut, "active: false")
+}
+
+func TestRunUsesSelectedPoolAccountInChildEnv(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixture(home))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+
+	stdout, _, err := executeCLI(t, home, "run", "--pool", "default-openai", "--", "sh", "-c", "printf '%s:%s' \"$OA_POOL_ID\" \"$OA_ACTIVE_ACCOUNT\"")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "default-openai:acc-1")
+}
+
+func TestRunRequiresCommandAfterDoubleDash(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixture(home))
+
+	_, _, err := executeCLI(t, home, "run", "--pool", "default-openai")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires a command after '--'")
+}
+
+func TestRunKeepsLogicalSessionStableForSameWorkspaceAndWindow(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixture(home))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+
+	t.Setenv("OA_WINDOW_FINGERPRINT", "window-a")
+	one, _, err := executeCLI(t, home, "run", "--pool", "default-openai", "--", "sh", "-c", "printf '%s|%s' \"$OA_LOGICAL_SESSION_ID\" \"$OA_PROVIDER_SESSION_ID\"")
+	require.NoError(t, err)
+	two, _, err := executeCLI(t, home, "run", "--pool", "default-openai", "--", "sh", "-c", "printf '%s|%s' \"$OA_LOGICAL_SESSION_ID\" \"$OA_PROVIDER_SESSION_ID\"")
+	require.NoError(t, err)
+
+	assert.Equal(t, one, two)
+	assert.Contains(t, one, "|")
+	assert.NotEqual(t, "|", one)
+}
+
 func executeCLI(t *testing.T, home string, args ...string) (string, string, error) {
 	t.Helper()
 	t.Setenv("HOME", home)

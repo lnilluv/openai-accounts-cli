@@ -77,3 +77,29 @@ go run . login browser --account 1
 ```bash
 go run . login device --account 1
 ```
+
+## Pooling and Auto-Switching
+
+Activate the default OpenAI pool (auto-discovers OpenAI accounts):
+
+```bash
+go run . pool activate
+```
+
+Show pool status:
+
+```bash
+go run . pool status
+```
+
+Deactivate the default pool:
+
+```bash
+go run . pool deactivate
+```
+
+Run opencode with pool-selected account and continuity env:
+
+```bash
+go run . run --pool default-openai -- opencode
+```
