@@ -18,9 +18,15 @@ func writeStatusesOutput(cmd *cobra.Command, app *app, statuses []application.St
 		return enc.Encode(statuses)
 	}
 
+	activeAccountID, err := app.continuityService.GetActiveAccountID(cmd.Context(), application.DefaultOpenAIPoolID)
+	if err != nil {
+		return fmt.Errorf("load active pool account: %w", err)
+	}
+
 	rendered, err := app.statusRenderer(statuses, statusadapter.RenderOptions{
-		Now:        app.now(),
-		StaleAfter: staleAfter,
+		Now:             app.now(),
+		StaleAfter:      staleAfter,
+		ActiveAccountID: activeAccountID,
 	})
 	if err != nil {
 		return fmt.Errorf("render status: %w", err)
