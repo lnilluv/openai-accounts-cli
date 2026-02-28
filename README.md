@@ -92,6 +92,12 @@ oa run --pool default-openai -- opencode
 OA_WINDOW_FINGERPRINT=project-a-window-1 oa run --pool default-openai -- opencode
 ```
 
+### Switching behavior
+
+- `oa pool switch` and `oa pool next` update the selected pool account and sync `~/.local/share/opencode/auth.json` immediately.
+- `oa usage` marks the selected account with `(Active)`.
+- If opencode is already running, restart it (or launch again with `oa run -- opencode`) to use the newly synced auth in that process.
+
 ## Commands
 
 | Command | Description |

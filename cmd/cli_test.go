@@ -544,6 +544,43 @@ func TestPoolNextRotatesFromCurrentAccount(t *testing.T) {
 	assert.Contains(t, stdout, "Switched to account 2")
 }
 
+func TestPoolSwitchSyncsOpencodeAuthImmediately(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixtureWithTwoChatGPTAuth(home))
+	require.NoError(t, writeOAuthSecretFixture(home, "1", "chatgpt@nilluv.com", "acct-1"))
+	require.NoError(t, writeOAuthSecretFixture(home, "2", "chatgpt2@nilluv.com", "acct-2"))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+
+	_, _, err = executeCLI(t, home, "pool", "switch", "--account", "2")
+	require.NoError(t, err)
+
+	auth := readOpencodeAuthFixture(t, home)
+	openai := auth["openai"].(map[string]any)
+	assert.Equal(t, "oauth", openai["type"])
+	assert.Equal(t, "acct-2", openai["accountId"])
+}
+
+func TestPoolNextSyncsOpencodeAuthImmediately(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixtureWithTwoChatGPTAuth(home))
+	require.NoError(t, writeOAuthSecretFixture(home, "1", "chatgpt@nilluv.com", "acct-1"))
+	require.NoError(t, writeOAuthSecretFixture(home, "2", "chatgpt2@nilluv.com", "acct-2"))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+	_, _, err = executeCLI(t, home, "pool", "switch", "--account", "1")
+	require.NoError(t, err)
+
+	_, _, err = executeCLI(t, home, "pool", "next")
+	require.NoError(t, err)
+
+	auth := readOpencodeAuthFixture(t, home)
+	openai := auth["openai"].(map[string]any)
+	assert.Equal(t, "acct-2", openai["accountId"])
+}
+
 func TestRunUsesSwitchedAccountWhenSet(t *testing.T) {
 	home := t.TempDir()
 	require.NoError(t, writeAccountsFixtureWithTwoNamedAccounts(home))
@@ -557,6 +594,53 @@ func TestRunUsesSwitchedAccountWhenSet(t *testing.T) {
 	stdout, _, err := executeCLI(t, home, "run", "--pool", "default-openai", "--", "sh", "-c", "printf '%s' \"$OA_ACTIVE_ACCOUNT\"")
 	require.NoError(t, err)
 	assert.Equal(t, "2", strings.TrimSpace(stdout))
+}
+
+func TestRunOpencodeSyncsAuthButOtherCommandsDoNot(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixtureWithTwoChatGPTAuth(home))
+	require.NoError(t, writeOAuthSecretFixture(home, "1", "chatgpt@nilluv.com", "acct-1"))
+	require.NoError(t, writeOAuthSecretFixture(home, "2", "chatgpt2@nilluv.com", "acct-2"))
+
+	binsDir := filepath.Join(home, "bin")
+	require.NoError(t, os.MkdirAll(binsDir, 0o755))
+	opencodePath := filepath.Join(binsDir, "opencode")
+	require.NoError(t, os.WriteFile(opencodePath, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	t.Setenv("PATH", binsDir+":"+os.Getenv("PATH"))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+	_, _, err = executeCLI(t, home, "pool", "switch", "--account", "2")
+	require.NoError(t, err)
+
+	_, _, err = executeCLI(t, home, "run", "--", "opencode")
+	require.NoError(t, err)
+	auth := readOpencodeAuthFixture(t, home)
+	assert.Equal(t, "acct-2", auth["openai"].(map[string]any)["accountId"])
+
+	require.NoError(t, os.Remove(filepath.Join(home, ".local", "share", "opencode", "auth.json")))
+	_, _, err = executeCLI(t, home, "run", "--", "sh", "-c", "exit 0")
+	require.NoError(t, err)
+	_, statErr := os.Stat(filepath.Join(home, ".local", "share", "opencode", "auth.json"))
+	assert.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestPoolSwitchPreservesRuntimeMemoryLedger(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixtureWithTwoChatGPTAuth(home))
+	require.NoError(t, writeOAuthSecretFixture(home, "1", "chatgpt@nilluv.com", "acct-1"))
+	require.NoError(t, writeOAuthSecretFixture(home, "2", "chatgpt2@nilluv.com", "acct-2"))
+	require.NoError(t, writePoolRuntimeFixture(home, "existing-memory"))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+	_, _, err = executeCLI(t, home, "pool", "switch", "--account", "2")
+	require.NoError(t, err)
+
+	runtimePath := filepath.Join(home, ".codex", "pool_runtime.toml")
+	data, err := os.ReadFile(runtimePath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "existing-memory")
 }
 
 func TestStatusMarksActiveAccountInTitle(t *testing.T) {
@@ -731,6 +815,101 @@ secret_ref = ""
 `
 
 	return os.WriteFile(filepath.Join(configDir, "accounts.toml"), []byte(accounts), 0o644)
+}
+
+func writeAccountsFixtureWithTwoChatGPTAuth(home string) error {
+	configDir := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return err
+	}
+
+	accounts := `version = 1
+
+[[accounts]]
+id = "1"
+name = "chatgpt@nilluv.com"
+
+[accounts.metadata]
+provider = ""
+model = "gpt-5"
+
+[accounts.auth]
+method = "chatgpt"
+secret_ref = "openai://1/oauth_tokens"
+
+[[accounts]]
+id = "2"
+name = "chatgpt2@nilluv.com"
+
+[accounts.metadata]
+provider = ""
+model = "gpt-5"
+
+[accounts.auth]
+method = "chatgpt"
+secret_ref = "openai://2/oauth_tokens"
+`
+
+	return os.WriteFile(filepath.Join(configDir, "accounts.toml"), []byte(accounts), 0o644)
+}
+
+func writeOAuthSecretFixture(home, accountID, email, chatgptAccountID string) error {
+	secretRoot := filepath.Join(home, ".codex", "secrets")
+	key := filepath.Clean("openai://" + accountID + "/oauth_tokens")
+	secretPath := filepath.Join(secretRoot, key)
+	if err := os.MkdirAll(filepath.Dir(secretPath), 0o755); err != nil {
+		return err
+	}
+
+	idPayload := fmt.Sprintf(`{"https://api.openai.com/profile":{"email":%q},"https://api.openai.com/auth":{"chatgpt_account_id":%q}}`, email, chatgptAccountID)
+	tokens := fmt.Sprintf(`{"access_token":%q,"refresh_token":%q,"id_token":%q,"expires_at":1772916150}`,
+		"access-"+accountID,
+		"refresh-"+accountID,
+		fakeJWT(idPayload),
+	)
+
+	return os.WriteFile(secretPath, []byte(tokens), 0o600)
+}
+
+func readOpencodeAuthFixture(t *testing.T, home string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(home, ".local", "share", "opencode", "auth.json"))
+	require.NoError(t, err)
+
+	var auth map[string]any
+	require.NoError(t, json.Unmarshal(data, &auth))
+	return auth
+}
+
+func writePoolRuntimeFixture(home, memorySummary string) error {
+	path := filepath.Join(home, ".codex", "pool_runtime.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+
+	runtime := fmt.Sprintf(`version = 1
+
+[[runtimes]]
+pool_id = 'default-openai'
+active_account_id = '1'
+last_synced_at = '2026-02-28T17:54:13+01:00'
+
+[[runtimes.sessions]]
+logical_session_id = 'abc123'
+
+[[runtimes.sessions.account_sessions]]
+account_id = '1'
+session_id = 'sess-1'
+
+[runtimes.sessions.memory]
+summary = %q
+decisions = []
+pending_tasks = []
+last_code_refs = []
+updated_at = ''
+`, memorySummary)
+
+	return os.WriteFile(path, []byte(runtime), 0o644)
 }
 
 func writeAccountsFixtureWithControlChars(home string) error {

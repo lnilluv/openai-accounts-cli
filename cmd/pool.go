@@ -122,6 +122,10 @@ func newPoolNextCmd(app *app) *cobra.Command {
 				return err
 			}
 
+			if err := syncOpencodeAuthForAccount(cmd.Context(), app, next); err != nil {
+				return err
+			}
+
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Switched to account %s\n", next)
 			return nil
 		},
@@ -151,6 +155,10 @@ func newPoolSwitchCmd(app *app) *cobra.Command {
 			}
 
 			if err := app.continuityService.SetActiveAccountID(cmd.Context(), domain.PoolID(poolID), target.ID); err != nil {
+				return err
+			}
+
+			if err := syncOpencodeAuthForAccount(cmd.Context(), app, target.ID); err != nil {
 				return err
 			}
 

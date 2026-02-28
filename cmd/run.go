@@ -52,6 +52,12 @@ func newRunCmd(app *app) *cobra.Command {
 				return err
 			}
 
+			if shouldSyncOpencodeAuth(args[0]) {
+				if err := syncOpencodeAuthForAccount(cmd.Context(), app, picked); err != nil {
+					return err
+				}
+			}
+
 			workspaceRoot, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("resolve workspace root: %w", err)
