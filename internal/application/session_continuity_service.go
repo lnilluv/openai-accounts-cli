@@ -87,6 +87,31 @@ func (s *SessionContinuityService) UpdateMemoryPacket(ctx context.Context, poolI
 	return nil
 }
 
+func (s *SessionContinuityService) GetActiveAccountID(ctx context.Context, poolID domain.PoolID) (domain.AccountID, error) {
+	runtime, err := s.loadRuntime(ctx, poolID)
+	if err != nil {
+		return "", err
+	}
+
+	return runtime.ActiveAccountID, nil
+}
+
+func (s *SessionContinuityService) SetActiveAccountID(ctx context.Context, poolID domain.PoolID, accountID domain.AccountID) error {
+	runtime, err := s.loadRuntime(ctx, poolID)
+	if err != nil {
+		return err
+	}
+
+	runtime.ActiveAccountID = accountID
+	runtime.LastSyncedAt = s.clock.Now()
+
+	if err := s.runtime.Save(ctx, runtime); err != nil {
+		return fmt.Errorf("save pool runtime: %w", err)
+	}
+
+	return nil
+}
+
 func (s *SessionContinuityService) loadRuntime(ctx context.Context, poolID domain.PoolID) (domain.PoolRuntime, error) {
 	runtime, err := s.runtime.GetByPoolID(ctx, poolID)
 	if err != nil {

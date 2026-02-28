@@ -155,6 +155,82 @@ func (s *PoolService) GetPool(ctx context.Context, poolID domain.PoolID) (domain
 	return pool, nil
 }
 
+func (s *PoolService) EligibleAccounts(ctx context.Context, poolID domain.PoolID) ([]domain.Account, error) {
+	pool, err := s.pools.GetByID(ctx, poolID)
+	if err != nil {
+		return nil, err
+	}
+	if !pool.Active {
+		return nil, domain.ErrPoolInactive
+	}
+
+	accounts, err := s.accounts.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list accounts: %w", err)
+	}
+
+	byID := make(map[domain.AccountID]domain.Account, len(accounts))
+	for _, account := range accounts {
+		byID[account.ID] = account
+	}
+
+	eligible := make([]domain.Account, 0, len(pool.Members))
+	for _, member := range pool.Members {
+		account, ok := byID[member]
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(account.Metadata.Provider) != string(pool.Provider) {
+			continue
+		}
+		if account.Limits.Weekly != nil && account.Limits.Weekly.Percent >= 100 {
+			continue
+		}
+		eligible = append(eligible, account)
+	}
+
+	if len(eligible) == 0 {
+		return nil, fmt.Errorf("no eligible accounts in pool %s", poolID)
+	}
+
+	return eligible, nil
+}
+
+func (s *PoolService) NextAccount(ctx context.Context, poolID domain.PoolID, current domain.AccountID) (domain.AccountID, error) {
+	eligible, err := s.EligibleAccounts(ctx, poolID)
+	if err != nil {
+		return "", err
+	}
+
+	if current == "" {
+		return eligible[0].ID, nil
+	}
+
+	for i, account := range eligible {
+		if account.ID != current {
+			continue
+		}
+		return eligible[(i+1)%len(eligible)].ID, nil
+	}
+
+	return eligible[0].ID, nil
+}
+
+func (s *PoolService) IsEligibleAccount(ctx context.Context, poolID domain.PoolID, accountID domain.AccountID) (bool, error) {
+	eligible, err := s.EligibleAccounts(ctx, poolID)
+	if err != nil {
+		return false, err
+	}
+
+	for _, account := range eligible {
+		if account.ID == accountID {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 func openAIMembers(accounts []domain.Account) []domain.AccountID {
 	members := make([]domain.AccountID, 0, len(accounts))
 	for _, account := range accounts {

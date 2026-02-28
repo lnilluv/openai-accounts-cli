@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -514,6 +515,50 @@ func TestPoolStatusSanitizesControlCharactersInMemberNames(t *testing.T) {
 	assert.Contains(t, stdout, "members: chatgpt@nilluv.comred")
 }
 
+func TestPoolSwitchInteractiveSelectsNumberedAccount(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixtureWithTwoNamedAccounts(home))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+
+	stdout, _, err := executeCLIWithInput(t, home, "2\n", "pool", "switch")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "1) chatgpt@nilluv.com")
+	assert.Contains(t, stdout, "2) chatgpt+alt@nilluv.com")
+	assert.Contains(t, stdout, "Switched to account 2")
+}
+
+func TestPoolNextRotatesFromCurrentAccount(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixtureWithTwoNamedAccounts(home))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+
+	_, _, err = executeCLI(t, home, "pool", "switch", "--account", "1")
+	require.NoError(t, err)
+
+	stdout, _, err := executeCLI(t, home, "pool", "next")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Switched to account 2")
+}
+
+func TestRunUsesSwitchedAccountWhenSet(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixtureWithTwoNamedAccounts(home))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+
+	_, _, err = executeCLI(t, home, "pool", "switch", "--account", "2")
+	require.NoError(t, err)
+
+	stdout, _, err := executeCLI(t, home, "run", "--pool", "default-openai", "--", "sh", "-c", "printf '%s' \"$OA_ACTIVE_ACCOUNT\"")
+	require.NoError(t, err)
+	assert.Equal(t, "2", strings.TrimSpace(stdout))
+}
+
 func TestRunUsesSelectedPoolAccountInChildEnv(t *testing.T) {
 	home := t.TempDir()
 	require.NoError(t, writeAccountsFixture(home))
@@ -560,8 +605,27 @@ func executeCLI(t *testing.T, home string, args ...string) (string, string, erro
 	root := newRootCmd()
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
+	stdin := bytes.NewBufferString("")
 	root.SetOut(stdout)
 	root.SetErr(stderr)
+	root.SetIn(stdin)
+	root.SetArgs(args)
+
+	err := root.Execute()
+	return stdout.String(), stderr.String(), err
+}
+
+func executeCLIWithInput(t *testing.T, home string, input string, args ...string) (string, string, error) {
+	t.Helper()
+	t.Setenv("HOME", home)
+
+	root := newRootCmd()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	stdin := bytes.NewBufferString(input)
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.SetIn(stdin)
 	root.SetArgs(args)
 
 	err := root.Execute()
