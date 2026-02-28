@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/bnema/openai-accounts-cli/internal/application"
 	"github.com/bnema/openai-accounts-cli/internal/domain"
@@ -79,13 +80,22 @@ func newPoolStatusCmd(app *app) *cobra.Command {
 			for _, member := range pool.Members {
 				status, statusErr := app.service.GetStatus(cmd.Context(), member)
 				if statusErr == nil && strings.TrimSpace(status.Account.Name) != "" {
-					members = append(members, status.Account.Name)
+					members = append(members, sanitizeForTerminal(status.Account.Name))
 					continue
 				}
-				members = append(members, string(member))
+				members = append(members, sanitizeForTerminal(string(member)))
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "members: %s\n", strings.Join(members, ", "))
 			return nil
 		},
 	}
+}
+
+func sanitizeForTerminal(value string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, value)
 }

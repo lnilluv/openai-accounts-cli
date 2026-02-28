@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -48,7 +49,10 @@ func (s *SessionContinuityService) GetOrAttachAccountSession(ctx context.Context
 		return sessionID, false, nil
 	}
 
-	sessionID := fmt.Sprintf("%s:%s", logicalSessionID, accountID)
+	sessionID, err := newProviderSessionID()
+	if err != nil {
+		return "", false, err
+	}
 	ledger.AccountSessions[accountID] = sessionID
 	runtime.Sessions[logicalSessionID] = ledger
 	runtime.ActiveAccountID = accountID
@@ -96,4 +100,13 @@ func (s *SessionContinuityService) loadRuntime(ctx context.Context, poolID domai
 	}
 
 	return runtime, nil
+}
+
+func newProviderSessionID() (string, error) {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate provider session id: %w", err)
+	}
+
+	return hex.EncodeToString(raw), nil
 }

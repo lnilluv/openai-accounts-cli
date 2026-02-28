@@ -485,6 +485,35 @@ func TestPoolDeactivateDisablesDefaultPool(t *testing.T) {
 	assert.Contains(t, statusOut, "active: false")
 }
 
+func TestRunFailsWhenPoolIsDeactivated(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixture(home))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+
+	_, _, err = executeCLI(t, home, "pool", "deactivate")
+	require.NoError(t, err)
+
+	_, _, err = executeCLI(t, home, "run", "--pool", "default-openai", "--", "sh", "-c", "echo ok")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pool is deactivated")
+}
+
+func TestPoolStatusSanitizesControlCharactersInMemberNames(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixtureWithControlChars(home))
+
+	_, _, err := executeCLI(t, home, "pool", "activate")
+	require.NoError(t, err)
+
+	stdout, _, err := executeCLI(t, home, "pool", "status")
+	require.NoError(t, err)
+	assert.NotContains(t, stdout, "\x1b")
+	assert.NotContains(t, stdout, "\a")
+	assert.Contains(t, stdout, "members: chatgpt@nilluv.comred")
+}
+
 func TestRunUsesSelectedPoolAccountInChildEnv(t *testing.T) {
 	home := t.TempDir()
 	require.NoError(t, writeAccountsFixture(home))
@@ -620,6 +649,17 @@ model = "gpt-5"
 method = ""
 secret_ref = ""
 `
+
+	return os.WriteFile(filepath.Join(configDir, "accounts.toml"), []byte(accounts), 0o644)
+}
+
+func writeAccountsFixtureWithControlChars(home string) error {
+	configDir := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		return err
+	}
+
+	accounts := "version = 1\n\n[[accounts]]\nid = \"1\"\nname = \"chatgpt@nilluv.com\\u001bred\\u0007\"\n\n[accounts.metadata]\nprovider = \"openai\"\nmodel = \"gpt-5\"\n\n[accounts.auth]\nmethod = \"\"\nsecret_ref = \"\"\n"
 
 	return os.WriteFile(filepath.Join(configDir, "accounts.toml"), []byte(accounts), 0o644)
 }
