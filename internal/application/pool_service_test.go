@@ -154,6 +154,31 @@ func TestPoolServiceNextAccountRotatesInEligibleOrder(t *testing.T) {
 	assert.Equal(t, domain.AccountID("1"), wrapped)
 }
 
+func TestPoolServiceEligibleAccountsIncludesChatGPTAuthWithEmptyProvider(t *testing.T) {
+	t.Parallel()
+
+	repo := &inMemoryAccountRepo{accounts: []domain.Account{
+		{ID: "1", Metadata: domain.AccountMetadata{Provider: ""}, Auth: domain.Auth{Method: domain.AuthMethodChatGPT}},
+		{ID: "2", Metadata: domain.AccountMetadata{Provider: ""}, Auth: domain.Auth{Method: domain.AuthMethodChatGPT}},
+	}}
+	pools := &inMemoryPoolRepo{pools: map[domain.PoolID]domain.Pool{
+		"default-openai": {
+			ID:       "default-openai",
+			Provider: domain.ProviderOpenAI,
+			Active:   true,
+			Members:  []domain.AccountID{"1", "2"},
+		},
+	}}
+
+	svc := NewPoolService(repo, pools, nil)
+
+	eligible, err := svc.EligibleAccounts(context.Background(), "default-openai")
+	require.NoError(t, err)
+	require.Len(t, eligible, 2)
+	assert.Equal(t, domain.AccountID("1"), eligible[0].ID)
+	assert.Equal(t, domain.AccountID("2"), eligible[1].ID)
+}
+
 type inMemoryPoolRepo struct {
 	pools map[domain.PoolID]domain.Pool
 }

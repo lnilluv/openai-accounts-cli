@@ -106,7 +106,7 @@ func (s *PoolService) PickAccount(ctx context.Context, poolID domain.PoolID) (do
 		if !ok {
 			continue
 		}
-		if strings.TrimSpace(account.Metadata.Provider) != string(pool.Provider) {
+		if !isPoolProviderMatch(pool, account) {
 			continue
 		}
 		if account.Limits.Weekly != nil && account.Limits.Weekly.Percent >= 100 {
@@ -180,7 +180,7 @@ func (s *PoolService) EligibleAccounts(ctx context.Context, poolID domain.PoolID
 		if !ok {
 			continue
 		}
-		if strings.TrimSpace(account.Metadata.Provider) != string(pool.Provider) {
+		if !isPoolProviderMatch(pool, account) {
 			continue
 		}
 		if account.Limits.Weekly != nil && account.Limits.Weekly.Percent >= 100 {
@@ -247,4 +247,13 @@ func weeklyPercent(account domain.Account) float64 {
 		return 0
 	}
 	return account.Limits.Weekly.Percent
+}
+
+func isPoolProviderMatch(pool domain.Pool, account domain.Account) bool {
+	provider := strings.TrimSpace(strings.ToLower(account.Metadata.Provider))
+	if provider == string(pool.Provider) {
+		return true
+	}
+
+	return pool.Provider == domain.ProviderOpenAI && account.Auth.Method == domain.AuthMethodChatGPT
 }
