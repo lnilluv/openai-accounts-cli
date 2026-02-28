@@ -21,6 +21,37 @@
 go install github.com/bnema/openai-accounts-cli/cmd/oa@latest
 ```
 
+### Add `oa` to your `PATH`
+
+`go install` places the binary in `$(go env GOPATH)/bin` (usually `$HOME/go/bin`) unless `GOBIN` is set.
+
+- `bash`
+  ```bash
+  echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.bashrc
+  source ~/.bashrc
+  ```
+- `zsh`
+  ```bash
+  echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc
+  source ~/.zshrc
+  ```
+- `fish`
+  ```fish
+  fish_add_path $HOME/go/bin
+  ```
+- `PowerShell`
+  ```powershell
+  $goBin = (go env GOPATH) + "\\bin"
+  [Environment]::SetEnvironmentVariable("Path", $env:Path + ";$goBin", "User")
+  ```
+
+Verify installation:
+
+```bash
+which oa
+oa version
+```
+
 ### Auth setup
 
 ```bash
@@ -47,6 +78,9 @@ oa pool status
 
 # Run opencode with auto-selected account from pool
 oa run --pool default-openai -- opencode
+
+# Optional: isolate continuity per terminal/window
+OA_WINDOW_FINGERPRINT=project-a-window-1 oa run --pool default-openai -- opencode
 ```
 
 ## Commands

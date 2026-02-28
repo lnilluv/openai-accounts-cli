@@ -429,6 +429,21 @@ func TestUsageCommandFetchesSubscriptionAndRendersRenewal(t *testing.T) {
 	assert.Contains(t, stdout, "14 Mar")
 }
 
+func TestRootAndRunHelpStayConcise(t *testing.T) {
+	home := t.TempDir()
+	require.NoError(t, writeAccountsFixture(home))
+
+	rootOut, _, err := executeCLI(t, home, "--help")
+	require.NoError(t, err)
+	assert.Contains(t, rootOut, "oa (OpenAI Accounts CLI) helps you store account auth references")
+	assert.NotContains(t, rootOut, "pool-selected account/session environment")
+
+	runOut, _, err := executeCLI(t, home, "run", "--help")
+	require.NoError(t, err)
+	assert.Contains(t, runOut, "Run a command with pool-selected account env")
+	assert.NotContains(t, runOut, "OA_LOGICAL_SESSION_ID")
+}
+
 func TestPoolActivateCreatesDefaultPool(t *testing.T) {
 	home := t.TempDir()
 	require.NoError(t, writeAccountsFixture(home))
